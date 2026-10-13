@@ -1,0 +1,46 @@
+id: fanqie
+name: 番茄小说
+language: zh-CN
+audience: broad
+pacing: elastic_serial
+paragraph_style: short_chinese_paragraphs
+chapter_word_min: 2000
+chapter_word_max: 3000
+required_beats:
+  - concrete_scene_change
+  - character_choice
+  - emotional_or_relationship_change
+  - plot_progress
+ending: causal_hook_or_resonant_end
+primary_genres:
+  - 都市言情
+  - 古代言情
+  - 现代言情
+  - 悬疑
+  - 现实题材
+writing_rules:
+  - 使用自然简体中文，按语义分段，不使用空格代替换行。
+  - 优先写具体生活细节、人物行动和潜台词，不用空泛金句填充字数。
+  - 每一章至少让处境、信息、关系或人物选择发生一项不可逆变化。
+  - 每章控制在 2000-3000 个计数单位；优先压缩重复说明，不得用截断代替收束。
+  - 结尾必须在 2000-3000 字内完成当前场景，并留下由本章行动造成的下一步危机或决定。
+  - 悬念必须由本章因果产生，避免为了留钩子突然添加无因由的大秘密。
+  - 冲突可以激烈，但人物不能为了推进剧情而失智或违背既定底线。
+  - 涉及现实、历史、职业和法律时，不把未经核实的细节写成确定事实。
+avoid:
+  - 全文繁体、乱码、未分段、章节空白、重复或高度相似内容
+  - 与正文无关的广告、外链、平台吐槽、引流和作者说明
+  - 流水账、恶意水文、复制百科新闻教材、空洞升华
+  - 色情化、未成年人负面导向、猎奇血腥和极端暴力细节
+  - 恶意歪曲历史、网暴引战、性别或阶级对立煽动
+literary_requirements:
+  - 人物欲望必须具体，并与恐惧、误解或现实代价发生冲突。
+  - 每场戏必须改变信息、关系、处境或选择成本中的至少一项。
+  - 情绪通过行动、细节、节奏和潜台词呈现，不只用情绪词解释。
+  - 人物不能为了推进剧情而失智；悬念不能替代因果。
+environment_requirements:
+  - 每个主要地点至少具备两项可感知细节和一项可制造冲突的限制。
+  - 环境要体现人物的阶层、职业、生活压力或历史，而不是可替换背景。
+  - 反复出现的地点与物件必须随着人物关系变化而产生意义变化。
+monitored_phrases: []
+continuity_signals: []

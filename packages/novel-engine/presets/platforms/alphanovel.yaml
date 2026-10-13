@@ -1,0 +1,36 @@
+id: alphanovel
+name: AlphaNovel
+language: English
+audience: female
+pacing: fast
+paragraph_style: short
+chapter_word_min: 1500
+chapter_word_max: 2500
+required_beats:
+  - conflict
+  - emotional_beat
+  - plot_progress
+ending: hook_or_cliffhanger
+primary_genres:
+  - Werewolf Romance
+  - Billionaire Romance
+writing_rules:
+  - Write in English for a female serial-fiction audience.
+  - Fast-paced serialized chapters. Short paragraphs. Natural dialogue.
+  - Strong emotion, high conflict, and frequent plot progress.
+  - End the chapter on a hook or cliffhanger.
+  - Prefer concrete action and spoken lines over literary description.
+avoid:
+  - Chinglish and Chinese-to-English calques
+  - Over-literary lyricism
+  - Long world-building lectures
+  - Repeated emotional statements that do not move the scene
+  - High-frequency AI filler
+monitored_phrases:
+  - she froze
+  - his eyes darkened
+  - her heart skipped a beat
+  - you are mine
+  - a smirk played on his lips
+  - electricity shot through
+continuity_signals: []

@@ -1,0 +1,13 @@
+{
+  "name": "ai-novel-studio",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AI + human long-form web novel studio",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "web": "npm run dev --workspace web",
+    "web:build": "npm run build --workspace web"
+  }
+}

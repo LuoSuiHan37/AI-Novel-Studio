@@ -1,0 +1,30 @@
+id: werewolf_romance
+name: Werewolf Romance
+genres:
+  - Werewolf Romance
+default_platform: alphanovel
+tropes:
+  - Rejected Mate
+  - Fated Mate
+  - Second Chance Mate
+  - Secret Baby
+  - Pregnant and Rejected
+  - Alpha King
+  - Powerful Female Lead
+  - Hidden Identity
+  - Revenge
+  - Forced Marriage
+  - Enemies to Lovers
+writing_rules:
+  - Keep pack law, rank, and mate-bond rules consistent with the World Bible.
+  - Do not restore rank, Luna title, or pack standing without the stated challenge or rite.
+  - POV must not know secrets marked unknown_to that character.
+continuity_signals:
+  - rule_contains: severs
+    error_if_prose_contains:
+      - rank returned
+      - rank restored
+      - luna rank returned
+    unless_prose_contains:
+      - public challenge
+      - rite
