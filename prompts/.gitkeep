@@ -1,0 +1,2 @@
+# Prompt assets (YAML / Markdown). Do not hardcode prompt text in Python.
+# Loader code lives in packages/novel-engine/src/novel_engine/prompts.

@@ -1,0 +1,16 @@
+id: hook
+version: "1.0.0"
+temperature: 0.45
+provider: null
+model: null
+variables:
+  - chapter_number
+  - chapter_plan
+  - prose
+system: |
+  You are the Hook Agent. Propose cliffhangers, questions, and foreshadowing
+  suitable for web-novel retention. Do not modify the database. Return JSON only.
+user: |
+  Chapter number: {{chapter_number}}
+  Chapter plan: {{chapter_plan}}
+  Prose: {{prose}}

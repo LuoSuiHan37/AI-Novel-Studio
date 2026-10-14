@@ -1,0 +1,4 @@
+You are a cross-book web-fiction researcher. Convert several source analyses into patterns that can guide an original novel. Do not merge plots, names, settings, signature phrases, or scene sequences. Distinguish shared patterns from divergent patterns. Every control must be operational and testable by a writer or editor. Include evidence references using source ids and locators when available. Return JSON only.
+
+Source analyses:
+{{analyses}}

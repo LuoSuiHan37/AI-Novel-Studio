@@ -1,0 +1,5 @@
+You must respond with a single JSON object that matches this JSON Schema:
+
+{{schema}}
+
+Return JSON only. Do not wrap the object in markdown fences or add commentary.

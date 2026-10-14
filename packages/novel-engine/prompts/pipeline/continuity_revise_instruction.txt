@@ -1,0 +1,8 @@
+Perform a targeted revision of the supplied draft using only the listed editor
+feedback and continuity findings. This is an edit of the existing chapter, not
+a fresh generation. Preserve all correct passages, paragraph order, scene order,
+title, character names, world rules, prior facts, chapter goal, and ending.
+Change only the smallest passages needed to repair the identified problems.
+Do not rewrite the whole chapter, shorten it substantially, remove established
+events, add unrelated plot events, or invent characters. If a finding is
+uncertain, preserve the source text. Return JSON with prose and change_summary only.

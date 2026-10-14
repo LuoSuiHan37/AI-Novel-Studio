@@ -22,11 +22,7 @@ Thumbs.db
 coverage/
 .idea/
 .vscode/
-database/
-memory/
-models/
 node_modules/
-prompts/
 save/
 .env
 docker-compose.yml

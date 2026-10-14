@@ -1,0 +1,12 @@
+The previous model output was not valid JSON for the required schema.
+
+JSON Schema:
+{{schema}}
+
+Validation or parse error:
+{{error}}
+
+Previous output:
+{{output}}
+
+Return only the corrected JSON object. Do not wrap it in markdown fences or add commentary.
