@@ -23,6 +23,11 @@ export type NovelAudit = {
   missing_plans: number[];
   repetition_findings: Array<Record<string, unknown>>;
   relevance_findings: Array<Record<string, unknown>>;
+  longitudinal_findings?: Array<Record<string, unknown>>;
+  story_state_findings?: Array<Record<string, unknown>>;
+  plot_thread_findings?: Array<Record<string, unknown>>;
+  plot_thread_coverage?: { open_hooks: number; open_foreshadowings: number };
+  memory_coverage?: { chapters_with_memory: number; approved_chapters: number };
   missing_architecture?: string[];
 };
 
@@ -228,6 +233,56 @@ export type MemoryItem = {
   content: string;
   chapter_number: number | null;
   location: string | null;
+  extra_metadata?: {
+    kind?: string;
+    scene_handoffs?: Array<{
+      scene_number?: number;
+      what_happened?: string;
+      character_changes?: string[];
+      new_information?: string[];
+      open_questions?: string[];
+      next_scene_requirements?: string[];
+      who_knows?: Record<string, string[]>;
+      unknown_to?: Record<string, string[]>;
+    }>;
+    memory_validation?: {
+      overall?: string;
+      findings?: Array<{ severity?: string; category?: string; problem?: string }>;
+    };
+  };
+};
+
+export type ContextPackPreview = {
+  chapter_number: number;
+  chapter_title: string;
+  story_arc: {
+    title: string;
+    start_chapter_number: number;
+    end_chapter_number: number;
+    summary: string;
+  } | null;
+  next_plot_beat: string;
+  context: {
+    open_hooks: string[];
+    forbidden_knowledge: Record<string, string[]>;
+    current_arc: string;
+    memory_brief: string;
+    memories: Array<{ content: string; memory_type: string; importance: string }>;
+  };
+  memory_package: {
+    token_estimate: number;
+    dropped_for_budget: number;
+    unresolved_hooks: string[];
+    foreshadowing: string[];
+    recent_chapters: Array<{
+      chapter_number: number;
+      title: string;
+      summary: string;
+      scene_handoffs?: Array<{ what_happened?: string; open_questions?: string[] }>;
+    }>;
+    semantic_hits: Array<{ content: string; chapter_number: number | null }>;
+  };
+  visible_text: string;
 };
 
 export type TimelineItem = {

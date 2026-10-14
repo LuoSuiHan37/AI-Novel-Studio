@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    # Single shared gateway token until a real identity provider is integrated.
+    # Production refuses to start without it.
+    api_auth_token: str = ""
     cors_origins: str = (
         "http://localhost:3000,http://127.0.0.1:3000,"
         "http://localhost:3001,http://127.0.0.1:3001,"

@@ -206,6 +206,7 @@ class ChapterRevision(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 class ChapterSummary(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "chapter_summaries"
+    __table_args__ = (UniqueConstraint("chapter_id", name="uq_chapter_summaries_chapter_id"),)
 
     chapter_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("chapters.id", ondelete="CASCADE"),

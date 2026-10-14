@@ -1,6 +1,7 @@
 # ai-novel-engine
 
-Domain package for **ai-novel-studio**. STEP 6 adds scheduled multi-agent proposals.
+Domain package for **ai-novel-studio**. It currently contains the multi-agent
+workflow and the chapter-generation/memory domain pipeline.
 
 ```
 src/novel_engine/

@@ -1,4 +1,5 @@
 import logging
+import hmac
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -7,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.responses import JSONResponse
 
 from app.api.errors import (
     domain_error_handler,
@@ -39,6 +41,8 @@ logger = logging.getLogger("ai-novel-studio.api")
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    if settings.app_env.lower() in {"production", "prod"} and not settings.api_auth_token:
+        raise RuntimeError("API_AUTH_TOKEN must be configured in production")
     setup_logging(settings.log_level)
     async with engine_lifespan(settings):
         yield
@@ -68,6 +72,21 @@ def create_app() -> FastAPI:
     async def request_id_middleware(request: Request, call_next):
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         request.state.request_id = request_id
+        protected = (
+            settings.app_env.lower() in {"production", "prod"}
+            and request.method != "OPTIONS"
+            and request.url.path not in {"/health", "/health/db", "/docs", "/openapi.json", "/redoc"}
+        )
+        if protected:
+            authorization = request.headers.get("Authorization", "")
+            supplied = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+            if not supplied or not hmac.compare_digest(supplied, settings.api_auth_token):
+                response = JSONResponse(
+                    status_code=401,
+                    content={"error": {"code": "authentication_required", "message": "有效的 Bearer token 是必须的"}},
+                )
+                response.headers["X-Request-ID"] = request_id
+                return response
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         logger.info(

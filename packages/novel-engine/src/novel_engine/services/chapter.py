@@ -60,7 +60,14 @@ class ChapterService:
         await self._uow.commit()
         return saved
 
-    async def approve(self, project_id: uuid.UUID, chapter_number: int, *, confirmed_by: str) -> Chapter:
+    async def approve(
+        self,
+        project_id: uuid.UUID,
+        chapter_number: int,
+        *,
+        confirmed_by: str,
+        commit: bool = True,
+    ) -> Chapter:
         if not confirmed_by.strip():
             raise InvalidStateError("confirmed_by is required")
         chapter = await self.get_by_number(project_id, chapter_number)
@@ -69,5 +76,6 @@ class ChapterService:
         if chapter.status is ChapterStatus.DRAFT:
             raise InvalidStateError("review the chapter before approving")
         saved = await self._uow.chapters.save(chapter.model_copy(update={"status": ChapterStatus.APPROVED}))
-        await self._uow.commit()
+        if commit:
+            await self._uow.commit()
         return saved

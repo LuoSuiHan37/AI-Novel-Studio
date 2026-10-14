@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 from difflib import SequenceMatcher
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.memory_bridge import hydrate_pipeline_memory, persist_commit
+from app.adapters.memory_bridge import _fact_dedupe_key, hydrate_pipeline_memory, persist_commit
 from app.api.context_builder import build_writer_context
 from app.api.deps import (
     Actor,
@@ -23,27 +24,35 @@ from app.api.deps import (
 from app.api.schemas import ChapterPatch, ChapterPlanCreate, ChapterPlanSuggest, ConfirmBody, GenerateBody, ProposeEditBody
 from app.services.book_snapshot import save_project_snapshot
 from app.db.models.chapter import ChapterSummary
+from app.db.models.memory import StoryMemory, TimelineEvent
 from app.db.models.continuity import ContinuityIssue
 from novel_engine.agents.contracts import (
     ChapterPlannerInput,
+    ChapterSummaryInput,
     CommercialReviewInput,
     ContinuityOutput,
     ContinuityInput,
     EditorInput,
     OutlineOutput,
     ReviseInput,
+    MemoryAgentInput,
 )
 from novel_engine.domain.errors import InvalidStateError
 from novel_engine.memory.service import MemoryService
 from novel_engine.models.entities import ChapterPlan, Hook, ScenePlan
 from novel_engine.models.enums import ApprovalStatus, ChapterStatus, ContinuitySeverity, ContinuityVerdict
+from novel_engine.models.enums import EpistemicStatus, Importance, MemoryLayer, MemoryType
 from novel_engine.presets.loader import resolve_style_bundle
 from novel_engine.providers.base import LLMProvider
 from novel_engine.providers.types import ChatMessage
 from novel_engine.services.engine import NovelEngine
 from novel_engine.workflows.agent_workflow import AgentWorkflow
 from novel_engine.workflows.chapter_pipeline import ChapterGenerationPipeline, is_local_revision
-from novel_engine.workflows.context import character_to_agent, plot_to_outline, story_bible_to_architect
+from novel_engine.workflows.context import character_to_agent, plan_to_agent, plot_to_outline, story_bible_to_architect
+from novel_engine.style.memory_continuity import scan_scene_handoffs
+from novel_engine.style.longitudinal_continuity import scan_longitudinal_continuity
+from novel_engine.style.story_state_continuity import scan_story_state_continuity
+from novel_engine.style.plot_thread_lifecycle import scan_plot_thread_lifecycle
 from novel_engine.style.canon import scan_context_alignment
 from novel_engine.style.commercial import scan_commercial_quality
 from novel_engine.style.chapter_repetition import scan_book_repetition, scan_chapter_repetition
@@ -53,6 +62,10 @@ from novel_engine.agents.contracts import ChapterPlannerInput, ContinuityInput, 
 from novel_engine.workflows.context import character_to_agent, plot_to_outline, story_bible_to_architect
 
 router = APIRouter(tags=["chapters"])
+
+
+def _content_fingerprint(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def _apply_chapter_budgets(proposal, *, minimum: int, maximum: int):
@@ -92,6 +105,231 @@ async def list_chapters(
     engine: Annotated[NovelEngine, Depends(get_engine)],
 ):
     return await engine.chapters.list(project_id)
+
+
+@router.get("/projects/{project_id}/chapters/{number}/context-pack")
+async def chapter_context_pack(
+    project_id: UUID,
+    number: int,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+) -> dict:
+    """Return the read-only memory package that would be supplied to the writer."""
+    memory = MemoryService()
+    session = getattr(engine.uow, "session", None)
+    history = await hydrate_pipeline_memory(session, project_id, memory) if isinstance(session, AsyncSession) else None
+    pipeline = ChapterGenerationPipeline(engine, None, memory, style_history=history)
+    loaded = await pipeline.load(project_id, number)
+    writer_context = loaded.writer_context
+    return {
+        "chapter_number": number,
+        "chapter_title": loaded.plan.chapter_title,
+        "story_arc": {
+            "title": loaded.arc.title,
+            "start_chapter_number": loaded.arc.start_chapter_number,
+            "end_chapter_number": loaded.arc.end_chapter_number,
+            "summary": loaded.arc.summary,
+        } if loaded.arc else None,
+        "next_plot_beat": (
+            getattr(loaded.arc, "summary", None)
+            or getattr(loaded.plot, "summary", None)
+            or loaded.bible.premise
+        ),
+        "context": writer_context.model_dump(mode="json"),
+        "memory_package": loaded.package.model_dump(mode="json"),
+        "visible_text": loaded.package.visible_text(),
+    }
+
+
+@router.post("/projects/{project_id}/memory/backfill")
+async def backfill_project_memory(
+    project_id: UUID,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+    workflow: Annotated[AgentWorkflow, Depends(get_workflow)],
+) -> dict:
+    """Extract durable summaries and knowledge boundaries for older approved chapters.
+
+    The operation is idempotent: chapters that already have a chapter-memory row
+    are reported as existing and are not duplicated.
+    """
+    await engine.get_project(project_id)
+    session = getattr(engine.uow, "session", None)
+    if not isinstance(session, AsyncSession):
+        raise InvalidStateError("memory backfill requires the database session")
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+        {"lock_key": f"story-memory-backfill:{project_id}"},
+    )
+    chapters = sorted(await engine.chapters.list(project_id), key=lambda item: item.chapter_number)
+    characters = await engine.characters.list(project_id)
+    allowed_names = {item.name for item in characters}
+    existing_rows = (
+        await session.scalars(select(StoryMemory).where(StoryMemory.project_id == project_id))
+    ).all()
+    existing_chapters = {
+        row.source_chapter_id
+        for row in existing_rows
+        if (row.extra_metadata or {}).get("kind") == "chapter_memory"
+    }
+    processed: list[int] = []
+    existing: list[int] = []
+    skipped: list[dict] = []
+    errors: list[dict] = []
+    for chapter in chapters:
+        if chapter.status not in {ChapterStatus.APPROVED, ChapterStatus.PUBLISHED}:
+            skipped.append({"chapter_number": chapter.chapter_number, "reason": "not_approved"})
+            continue
+        if chapter.id in existing_chapters:
+            existing.append(chapter.chapter_number)
+            continue
+        plan = await engine.uow.chapter_plans.latest_for_chapter(chapter.id)
+        if plan is None or not chapter.content.strip():
+            skipped.append({"chapter_number": chapter.chapter_number, "reason": "missing_plan_or_content"})
+            continue
+        scenes = await engine.scene_plans.list(plan.id)
+        savepoint = await session.begin_nested()
+        try:
+            plan_input = plan_to_agent(plan, scenes)
+            summary = (
+                await workflow.chapter_summary.run(
+                    ChapterSummaryInput(
+                        chapter_number=chapter.chapter_number,
+                        chapter_plan=plan_input,
+                        prose=chapter.content,
+                    )
+                )
+            ).output
+            memory_result = (
+                await workflow.memory.run(
+                    MemoryAgentInput(
+                        chapter_number=chapter.chapter_number,
+                        prose=chapter.content,
+                        chapter_plan=plan_input,
+                    )
+                )
+            ).output
+            handoffs = list(summary.scene_handoffs)
+            findings = scan_scene_handoffs(
+                prose=chapter.content,
+                handoffs=handoffs,
+                planned_scene_numbers={item.scene_number for item in scenes},
+                planned_scene_locations={item.scene_number: item.location for item in scenes},
+                planned_scene_characters={item.scene_number: set(item.characters) for item in scenes},
+                allowed_characters=allowed_names | set(plan.characters),
+            )
+            stored_summary = await session.scalar(
+                select(ChapterSummary).where(ChapterSummary.chapter_id == chapter.id)
+            )
+            summary_values = dict(
+                summary=summary.summary,
+                key_events=list(summary.key_events),
+                new_facts=list(summary.new_facts),
+                character_changes=list(summary.character_changes),
+                new_secrets=list(summary.new_secrets),
+                resolved_secrets=list(summary.resolved_secrets),
+                unresolved_hooks=list(summary.unresolved_hooks),
+                location=summary.location or plan.location,
+            )
+            if stored_summary is None:
+                session.add(
+                    ChapterSummary(
+                    chapter_id=chapter.id,
+                        **summary_values,
+                    )
+                )
+            else:
+                for key, value in summary_values.items():
+                    setattr(stored_summary, key, value)
+            session.add(
+                StoryMemory(
+                    project_id=project_id,
+                    memory_type=MemoryType.PLOT.value,
+                    layer=MemoryLayer.CHAPTER.value,
+                    epistemic_status=EpistemicStatus.CONFIRMED_FACT.value,
+                    importance=Importance.HIGH.value,
+                     source_chapter_id=chapter.id,
+                     dedupe_key=f"chapter_memory:{chapter.id}",
+                     chapter_number=chapter.chapter_number,
+                    location=summary.location or plan.location,
+                    content=summary.summary,
+                    known_by=list(plan.characters),
+                    tags=["chapter", "backfilled"],
+                    extra_metadata={
+                        "kind": "chapter_memory",
+                        "title": summary.title or plan.chapter_title,
+                        "key_events": list(summary.key_events),
+                        "new_facts": list(summary.new_facts),
+                        "character_changes": list(summary.character_changes),
+                        "unresolved_hooks": list(summary.unresolved_hooks),
+                        "characters": list(plan.characters),
+                        "scene_handoffs": [item.model_dump() for item in handoffs],
+                        "memory_validation": {
+                            "overall": "error" if any(item.severity is ContinuityVerdict.ERROR for item in findings) else "pass",
+                            "findings": [item.model_dump(mode="json") for item in findings],
+                        },
+                    },
+                )
+            )
+            for item in memory_result.memories:
+                session.add(
+                    StoryMemory(
+                        project_id=project_id,
+                        memory_type=item.memory_type.value,
+                        layer=(MemoryLayer.CHARACTER if item.character_name else MemoryLayer.CHAPTER).value,
+                        epistemic_status=EpistemicStatus.TENTATIVE_FACT.value,
+                        importance=item.importance.value,
+                         source_chapter_id=chapter.id,
+                         dedupe_key=_fact_dedupe_key("fact", chapter.id, item.content),
+                         chapter_number=chapter.chapter_number,
+                        content=item.content,
+                        known_by=list(item.known_by) or (list(plan.characters) if not item.character_name else []),
+                        tags=["backfilled", "fact"],
+                        extra_metadata={
+                            "kind": "fact",
+                            "character_name": item.character_name,
+                            "source_excerpt": item.source_excerpt,
+                        },
+                        unknown_to=list(item.unknown_to),
+                    )
+                )
+            for handoff in handoffs:
+                facts: dict[str, dict[str, list[str]]] = {}
+                for name, items in handoff.who_knows.items():
+                    for fact in items:
+                        facts.setdefault(fact, {}).setdefault("known_by", []).append(name)
+                for name, items in handoff.unknown_to.items():
+                    for fact in items:
+                        facts.setdefault(fact, {}).setdefault("unknown_to", []).append(name)
+                for fact, visibility in facts.items():
+                    session.add(
+                        StoryMemory(
+                            project_id=project_id,
+                            memory_type=MemoryType.FACT.value,
+                            layer=MemoryLayer.CHARACTER.value,
+                            epistemic_status=EpistemicStatus.TENTATIVE_FACT.value,
+                            importance=Importance.MEDIUM.value,
+                             source_chapter_id=chapter.id,
+                             dedupe_key=_fact_dedupe_key("knowledge_boundary", chapter.id, fact),
+                             chapter_number=chapter.chapter_number,
+                            content=fact,
+                            known_by=visibility.get("known_by", []),
+                            unknown_to=visibility.get("unknown_to", []),
+                            tags=["backfilled", "scene_handoff", f"scene:{handoff.scene_number}"],
+                            extra_metadata={"kind": "knowledge_boundary", "source_excerpt": handoff.source_excerpt},
+                        )
+                    )
+            processed.append(chapter.chapter_number)
+            await savepoint.commit()
+        except Exception as exc:
+            errors.append({"chapter_number": chapter.chapter_number, "reason": str(exc)})
+            await savepoint.rollback()
+    await session.commit()
+    return {
+        "processed": processed,
+        "already_present": existing,
+        "skipped": skipped,
+        "errors": errors,
+        "complete": not errors and not skipped,
+    }
 
 
 @router.get("/projects/{project_id}/chapters/repetition-scan")
@@ -171,11 +409,13 @@ async def novel_audit(
     repetition_findings = scan_book_repetition(chapters)
     relevance_findings: list[dict] = []
     missing_plans: list[int] = []
+    plans_by_chapter: dict[int, object] = {}
     for chapter in chapters:
         plan = await engine.uow.chapter_plans.latest_for_chapter(chapter.id)
         if plan is None:
             missing_plans.append(chapter.chapter_number)
             continue
+        plans_by_chapter[chapter.chapter_number] = plan
         scenes = await engine.scene_plans.list(plan.id)
         relevance = scan_chapter_relevance(content=chapter.content, plan=plan, scenes=scenes)
         if relevance.blocked:
@@ -183,6 +423,53 @@ async def novel_audit(
                 "chapter_number": chapter.chapter_number,
                 **relevance.model_dump(),
             })
+    chapter_memories: dict[int, dict] = {}
+    memory_rows = []
+    session = getattr(engine.uow, "session", None)
+    if isinstance(session, AsyncSession):
+        memory_rows = (
+            await session.scalars(select(StoryMemory).where(StoryMemory.project_id == project_id))
+        ).all()
+        for row in memory_rows:
+            metadata = row.extra_metadata or {}
+            if metadata.get("kind") == "chapter_memory" and row.chapter_number is not None:
+                chapter_memories[row.chapter_number] = {
+                    "summary": row.content,
+                    "scene_handoffs": list(metadata.get("scene_handoffs") or []),
+                }
+    longitudinal_findings = scan_longitudinal_continuity(
+        chapters=chapters,
+        chapter_memories=chapter_memories,
+        target_chapter_count=target,
+    )
+    timeline_rows = []
+    if isinstance(session, AsyncSession):
+        timeline_rows = (
+            await session.scalars(
+                select(TimelineEvent).where(TimelineEvent.project_id == project_id)
+            )
+        ).all()
+    story_state_findings = scan_story_state_continuity(
+        chapters=chapters,
+        plans=plans_by_chapter,
+        arcs=arcs,
+        plot_beats=active_plot.beats if active_plot else [],
+        timeline_events=timeline_rows,
+        memory_rows=memory_rows,
+    )
+    chapter_id_numbers = {item.id: item.chapter_number for item in chapters}
+    hooks = await engine.hooks.list(project_id)
+    foreshadowings = await engine.foreshadowings.list(project_id)
+    latest_approved = max(
+        (item.chapter_number for item in chapters if item.status.value in {"approved", "published"}),
+        default=0,
+    )
+    plot_thread_findings = scan_plot_thread_lifecycle(
+        hooks=hooks,
+        foreshadowings=foreshadowings,
+        chapter_numbers=chapter_id_numbers,
+        latest_approved_chapter=latest_approved,
+    )
     blocked = bool(
         missing
         or overflow
@@ -192,6 +479,9 @@ async def novel_audit(
         or relevance_findings
         or missing_plans
         or missing_architecture
+        or any(item.severity is ContinuityVerdict.ERROR for item in longitudinal_findings)
+        or any(item.severity is ContinuityVerdict.ERROR for item in story_state_findings)
+        or any(item.severity is ContinuityVerdict.ERROR for item in plot_thread_findings)
     )
     return {
         "status": "blocked" if blocked else "passed",
@@ -206,6 +496,19 @@ async def novel_audit(
         "missing_architecture": missing_architecture,
         "repetition_findings": repetition_findings,
         "relevance_findings": relevance_findings,
+        "longitudinal_findings": [item.model_dump(mode="json") for item in longitudinal_findings],
+        "story_state_findings": [item.model_dump(mode="json") for item in story_state_findings],
+        "plot_thread_findings": [item.model_dump(mode="json") for item in plot_thread_findings],
+        "plot_thread_coverage": {
+            "open_hooks": sum(item.status.value not in {"resolved", "dropped"} for item in hooks),
+            "open_foreshadowings": sum(item.status.value not in {"paid_off", "missed", "dropped"} for item in foreshadowings),
+        },
+        "memory_coverage": {
+            "chapters_with_memory": len(chapter_memories),
+            "approved_chapters": sum(
+                item.status.value in {"approved", "published"} for item in chapters
+            ),
+        },
     }
 
 
@@ -457,6 +760,7 @@ async def generate_chapter(
             "relevance_check": result.relevance_check,
             "independent_review": getattr(review_workflow, "provider_identity", None),
             "independent_commercial": commercial.model_dump() if commercial else None,
+            "content_fingerprint": _content_fingerprint(chapter_row.content),
         }
         await engine.chapters.update(chapter_row.model_copy(update={"extra_metadata": metadata}))
         await save_project_snapshot(engine, project_id)
@@ -480,7 +784,12 @@ async def generate_chapter(
         )
         session = getattr(engine.uow, "session", None)
         if isinstance(session, AsyncSession):
-            await persist_commit(session, project_id, pipeline_result.chapter.id, pipeline, pipeline_result)
+            try:
+                await persist_commit(session, project_id, pipeline_result.chapter.id, pipeline, pipeline_result)
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
         chapter_row = await engine.chapters.get_by_number(project_id, number)
         await save_project_snapshot(engine, project_id)
         auto_approved = chapter_row.status is ChapterStatus.APPROVED
@@ -677,6 +986,7 @@ async def patch_chapter(
             "status": "failed" if repetition_check.blocked or (relevance_check and relevance_check.blocked) else "pending",
             "repetition_check": repetition_check.model_dump(),
             "relevance_check": relevance_check.model_dump() if relevance_check else {"status": "missing_plan", "blocked": True},
+            "content_fingerprint": _content_fingerprint(chapter.content),
         }
         chapter = await engine.chapters.update(chapter.model_copy(update={"extra_metadata": metadata}))
         await save_project_snapshot(engine, project_id)
@@ -833,6 +1143,7 @@ async def review_chapter(
         "status": "passed",
         "independent_review": getattr(review_workflow, "provider_identity", None),
         "independent_commercial": commercial.model_dump() if commercial else None,
+        "content_fingerprint": _content_fingerprint(chapter.content),
     }
     await engine.chapters.update(chapter.model_copy(update={"extra_metadata": metadata}))
     # Persist audit metadata before changing the lifecycle state. The chapter
@@ -933,11 +1244,19 @@ async def continuity_chapter(
             )
         await session.commit()
     metadata = dict(chapter.extra_metadata or {})
+    prior_audit = metadata.get("audit") or {}
+    continuity_blocked = (
+        continuity.overall is ContinuityVerdict.ERROR
+        or repetition_check.blocked
+        or plan is None
+        or (relevance_check and relevance_check.blocked)
+    )
     metadata["audit"] = {
-        **(metadata.get("audit") or {}),
-        "status": "failed" if continuity.overall is ContinuityVerdict.ERROR or repetition_check.blocked or plan is None or (relevance_check and relevance_check.blocked) else "completed",
+        **prior_audit,
+        "status": "failed" if continuity_blocked else "passed" if prior_audit.get("status") == "passed" else "completed",
         "repetition_check": repetition_check.model_dump(),
         "relevance_check": relevance_check.model_dump() if relevance_check else {"status": "missing_plan", "blocked": True},
+        "content_fingerprint": _content_fingerprint(chapter.content),
     }
     await engine.chapters.update(chapter.model_copy(update={"extra_metadata": metadata}))
     return {
@@ -962,7 +1281,13 @@ async def approve_chapter(
 ):
     if review_workflow is None:
         raise InvalidStateError("未完成独立审查，不能批准章节")
-    pipeline = await _pipeline(engine, workflow, project_id)
+    chapter = await engine.chapters.get_by_number(project_id, number)
+    audit = dict(chapter.extra_metadata or {}).get("audit") or {}
+    if audit.get("status") != "passed":
+        raise InvalidStateError("当前章节没有通过独立审查，不能批准")
+    if audit.get("content_fingerprint") != _content_fingerprint(chapter.content):
+        raise InvalidStateError("独立审查针对的正文版本已变化，请重新审查")
+    pipeline = await _pipeline(engine, workflow, project_id, review_workflow=review_workflow)
     result = await pipeline.commit_approved_chapter(
         project_id,
         number,
@@ -970,7 +1295,12 @@ async def approve_chapter(
     )
     session = getattr(engine.uow, "session", None)
     if isinstance(session, AsyncSession):
-        await persist_commit(session, project_id, result.chapter.id, pipeline, result)
+        try:
+            await persist_commit(session, project_id, result.chapter.id, pipeline, result)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
     await save_project_snapshot(engine, project_id)
     return result.chapter
 

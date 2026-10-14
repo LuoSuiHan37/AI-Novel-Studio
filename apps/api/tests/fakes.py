@@ -101,6 +101,7 @@ def generate_payloads() -> list[dict]:
             "used_character_names": ["Aria"],
             "planted_hooks": ["Who called her princess?"],
         },
+        {"memories": [], "scene_handoffs": []},
         editor_payload(),
         {"overall": "PASS", "findings": []},
         {"memories": [{"memory_type": "event", "importance": "high", "content": "Kael rejected Aria", "character_name": "Aria"}]},

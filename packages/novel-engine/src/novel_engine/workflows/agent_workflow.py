@@ -133,6 +133,7 @@ class AgentWorkflow:
     async def draft_chapter_by_scenes(self, payload: WriterInput) -> ChapterPassBundle:
         """Draft, validate, and assemble each planned scene under a hard budget."""
         scene_outputs = []
+        scene_handoffs = []
         previous_tail = ""
         first_written = None
         scenes = list(payload.context.chapter_plan.scenes)
@@ -235,6 +236,22 @@ class AgentWorkflow:
             if first_written is None:
                 first_written = written
             scene_outputs.append(prose)
+            # Extract the state transition immediately after each scene. The
+            # next scene already receives the previous prose tail; this durable
+            # handoff also makes the transition auditable after assembly.
+            scene_memory = await self.memory.run(
+                MemoryAgentInput(
+                    chapter_number=payload.context.chapter_plan.chapter_number,
+                    prose=prose,
+                    chapter_plan=scene_plan,
+                )
+            )
+            for handoff in scene_memory.output.scene_handoffs:
+                scene_handoffs.append(
+                    handoff.model_copy(
+                        update={"scene_number": scene.scene_number, "location": scene.location}
+                    )
+                )
             accumulated += count
             previous_tail = prose[-600:]
 
@@ -258,6 +275,14 @@ class AgentWorkflow:
             prose=prose,
             chapter_plan=payload.context.chapter_plan,
         ))
+        if scene_handoffs:
+            memory = memory.model_copy(
+                update={
+                    "output": memory.output.model_copy(
+                        update={"scene_handoffs": scene_handoffs}
+                    )
+                }
+            )
         hooks = await self.hook.run(HookAgentInput(
             chapter_number=payload.context.chapter_plan.chapter_number,
             chapter_plan=payload.context.chapter_plan,

@@ -336,10 +336,31 @@ class MemoryCandidate(AgentModel):
     importance: Importance
     content: str
     character_name: str | None = None
+    known_by: list[str] = Field(default_factory=list)
+    unknown_to: list[str] = Field(default_factory=list)
+    source_excerpt: str = ""
+
+
+class SceneHandoff(AgentModel):
+    """The accepted state transition a later scene/chapter must inherit."""
+
+    scene_number: int
+    location: str = ""
+    time_marker: str = ""
+    what_happened: str
+    character_changes: list[str] = Field(default_factory=list)
+    new_information: list[str] = Field(default_factory=list)
+    relationship_changes: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    next_scene_requirements: list[str] = Field(default_factory=list)
+    who_knows: dict[str, list[str]] = Field(default_factory=dict)
+    unknown_to: dict[str, list[str]] = Field(default_factory=dict)
+    source_excerpt: str = ""
 
 
 class MemoryAgentOutput(AgentModel):
     memories: list[MemoryCandidate]
+    scene_handoffs: list[SceneHandoff] = Field(default_factory=list)
 
 
 class HookAgentInput(AgentModel):
@@ -382,3 +403,4 @@ class ChapterSummaryOutput(AgentModel):
     resolved_secrets: list[str] = Field(default_factory=list)
     unresolved_hooks: list[str] = Field(default_factory=list)
     location: str | None = None
+    scene_handoffs: list[SceneHandoff] = Field(default_factory=list)

@@ -54,6 +54,10 @@ alembic upgrade head
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+从仓库根目录执行测试时使用 `python -m pytest`；这样会同时加载 API 和
+`novel-engine` 的源码路径。生产环境必须设置 `.env` 中的 `API_AUTH_TOKEN`；
+开发环境仍保留本地调试身份头，但它不具备生产安全性。
+
 Windows PowerShell 也可以直接运行 `./start.ps1`。启动时请使用项目虚拟环境的 Python；全局 `uvicorn` 不会自动发现 `packages/novel-engine/src` 中的 `novel_engine` 包。
 
 健康检查：
@@ -100,9 +104,8 @@ pytest
 - Chapter Generation Pipeline（mock LLM，连续 5 章 HITL）
 
 ```bash
-cd apps/api
-alembic upgrade head
-pytest
+alembic -c apps/api/alembic.ini upgrade head
+python -m pytest
 ```
 
 前端验证：`cd apps/web && npm run build`，或 `npm run dev` 后走完创建项目 → Story Bible → 角色/世界/情节 → 章节计划 → 编辑器（预览后再 Apply/Save）。

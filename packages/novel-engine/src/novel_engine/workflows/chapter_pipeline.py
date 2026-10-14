@@ -38,6 +38,7 @@ from novel_engine.models.enums import (
     ContinuityVerdict,
     EpistemicStatus,
     ForeshadowStatus,
+    Importance,
     MemoryLayer,
     MemoryType,
 )
@@ -57,6 +58,7 @@ from novel_engine.style.canon import scan_context_alignment
 from novel_engine.style.commercial import scan_commercial_quality
 from novel_engine.style.chapter_repetition import scan_chapter_repetition
 from novel_engine.style.chapter_relevance import scan_chapter_relevance
+from novel_engine.style.memory_continuity import scan_scene_handoffs
 from novel_engine.workflows.agent_workflow import AgentWorkflow, ChapterPassBundle
 from novel_engine.workflows.context import (
     build_writer_context,
@@ -133,6 +135,7 @@ class CommitResult(BaseModel):
     timeline: TimelineMemory
     character_states: list[CharacterMemory]
     advances_next_chapter: bool = False
+    memory_validation: dict = Field(default_factory=dict)
 
 
 def _revise_instruction() -> str:
@@ -340,6 +343,8 @@ class ChapterGenerationPipeline:
                 watchlist=style.platform.monitored_phrases,
             )
         )
+        previous_chapter = await self.engine.chapters.get_by_number(project_id, chapter_number - 1) if chapter_number > 1 else None
+        previous_memory = self.memory.store.chapter(project_id, chapter_number - 1) if chapter_number > 1 else None
         writer_context = build_writer_context(
             bible=bible,
             world=world,
@@ -360,7 +365,10 @@ class ChapterGenerationPipeline:
             memory_brief=package_brief(package),
             memories=snippets_from_package(package),
             forbidden_knowledge=package.forbidden_knowledge,
-            previous_chapter_summary=_previous_chapter_context(previous_chapter=await self.engine.chapters.get_by_number(project_id, chapter_number - 1) if chapter_number > 1 else None),
+            previous_chapter_summary=_previous_chapter_context(
+                previous_chapter=previous_chapter,
+                previous_memory=previous_memory,
+            ),
             language=project.language,
             creative_profile=creative_profile,
             chapter_word_min=style.platform.chapter_word_min,
@@ -842,6 +850,25 @@ class ChapterGenerationPipeline:
         )
 
         summary = summary_result.output
+        # Scene-level extraction is produced during scene generation. Prefer it
+        # over a second chapter-level interpretation when available, while
+        # retaining the summary agent as a safe fallback for older workflows.
+        if memory_result.output.scene_handoffs:
+            summary = summary.model_copy(
+                update={"scene_handoffs": list(memory_result.output.scene_handoffs)}
+            )
+        handoff_findings = scan_scene_handoffs(
+            prose=prose,
+            handoffs=list(summary.scene_handoffs),
+            planned_scene_numbers={scene.scene_number for scene in loaded.scenes},
+            planned_scene_locations={scene.scene_number: scene.location for scene in loaded.scenes},
+            planned_scene_characters={scene.scene_number: set(scene.characters) for scene in loaded.scenes},
+            allowed_characters={item.name for item in loaded.characters} | set(loaded.plan.characters),
+        )
+        hard_handoff_errors = [item for item in handoff_findings if item.severity is ContinuityVerdict.ERROR]
+        if hard_handoff_errors:
+            details = "; ".join(item.problem for item in hard_handoff_errors[:3])
+            raise InvalidStateError(f"不能批准：场景交接记忆校验失败：{details}")
         chapter_memory = ChapterMemory(
             project_id=project_id,
             chapter_number=chapter_number,
@@ -856,6 +883,7 @@ class ChapterGenerationPipeline:
             location=summary.location or loaded.plan.location,
             characters=list(loaded.plan.characters),
             arc=loaded.arc.summary if loaded.arc else None,
+            scene_handoffs=[item.model_dump() for item in summary.scene_handoffs],
         )
         self.memory.add_chapter(chapter_memory, confirmed_by=confirmed_by)
 
@@ -868,9 +896,20 @@ class ChapterGenerationPipeline:
             if not changes:
                 changes = list(summary.character_changes[:1])
             experiences = [*current.experiences, *changes, *summary.key_events[:1]]
+            knows = list(current.knows)
+            does_not_know = list(current.does_not_know)
+            for handoff in summary.scene_handoffs:
+                for character, facts in handoff.who_knows.items():
+                    if character.casefold() == name.casefold():
+                        knows.extend(facts)
+                for character, facts in handoff.unknown_to.items():
+                    if character.casefold() == name.casefold():
+                        does_not_know.extend(facts)
             current = current.model_copy(
                 update={
                     "experiences": experiences[-12:],
+                    "knows": list(dict.fromkeys(knows))[-24:],
+                    "does_not_know": list(dict.fromkeys(does_not_know))[-24:],
                     "current_state": changes[0] if changes else f"After chapter {chapter_number}",
                     "relationship_changes": [*current.relationship_changes, *changes][-8:],
                 }
@@ -894,6 +933,34 @@ class ChapterGenerationPipeline:
                 ),
                 confirmed_by=confirmed_by,
             )
+
+        # Promote scene-level knowledge boundaries to durable fact records. This
+        # keeps POV filtering effective after the in-memory pipeline is rebuilt.
+        for handoff in summary.scene_handoffs:
+            facts_by_character: dict[str, dict[str, list[str]]] = {}
+            for character, facts in handoff.who_knows.items():
+                for fact in facts:
+                    facts_by_character.setdefault(fact, {}).setdefault("known_by", []).append(character)
+            for character, facts in handoff.unknown_to.items():
+                for fact in facts:
+                    facts_by_character.setdefault(fact, {}).setdefault("unknown_to", []).append(character)
+            for fact, visibility in facts_by_character.items():
+                self.memory.write(
+                    project_id,
+                    MemoryProposal(
+                        layer=MemoryLayer.CHARACTER,
+                        suggested_status=EpistemicStatus.TENTATIVE_FACT,
+                        memory_type=MemoryType.FACT,
+                        importance=Importance.MEDIUM,
+                        content=fact,
+                        chapter_number=chapter_number,
+                        known_by=visibility.get("known_by", []),
+                        unknown_to=visibility.get("unknown_to", []),
+                        tags=["scene_handoff", f"scene:{handoff.scene_number}"],
+                        source="llm",
+                    ),
+                    confirmed_by=confirmed_by,
+                )
 
         sequence = chapter_number
         timeline = TimelineMemory(
@@ -970,7 +1037,12 @@ class ChapterGenerationPipeline:
             conflict=loaded.plan.conflict,
             watchlist=loaded.style.platform.monitored_phrases,
         )
-        approved = await self.engine.chapters.approve(project_id, chapter_number, confirmed_by=confirmed_by)
+        approved = await self.engine.chapters.approve(
+            project_id,
+            chapter_number,
+            confirmed_by=confirmed_by,
+            commit=False,
+        )
         return CommitResult(
             chapter=approved,
             summary=summary,
@@ -979,6 +1051,10 @@ class ChapterGenerationPipeline:
             foreshadowings=foreshadowings,
             timeline=timeline,
             character_states=character_states,
+            memory_validation={
+                "overall": "warning" if handoff_findings else "pass",
+                "findings": [item.model_dump(mode="json") for item in handoff_findings],
+            },
         )
 
     def _ensure_global(self, project_id, bible, world, characters, plot) -> None:
@@ -995,12 +1071,37 @@ class ChapterGenerationPipeline:
         )
 
 
-def _previous_chapter_context(previous_chapter) -> str:
+def _previous_chapter_context(previous_chapter, previous_memory: ChapterMemory | None = None) -> str:
     if previous_chapter is None or not previous_chapter.content.strip():
         return ""
+    handoff_text = ""
+    if previous_memory and previous_memory.scene_handoffs:
+        handoff_text = "\nScene handoffs:\n" + "\n".join(
+            "- Scene {scene}: {event}; changes: {changes}; open questions: {questions}; next: {next_steps}".format(
+                scene=item.get("scene_number", "?"),
+                event=item.get("what_happened", ""),
+                changes="、".join(item.get("character_changes") or []),
+                questions="、".join(item.get("open_questions") or []),
+                next_steps="、".join(item.get("next_scene_requirements") or []),
+            )
+            for item in previous_memory.scene_handoffs
+        )
+        knowledge_text = "\nKnowledge state:\n" + "\n".join(
+            f"- {character} knows: {fact}"
+            for item in previous_memory.scene_handoffs
+            for character, facts in (item.get("who_knows") or {}).items()
+            for fact in facts
+        ) + "\n" + "\n".join(
+            f"- {character} does not know: {fact}"
+            for item in previous_memory.scene_handoffs
+            for character, facts in (item.get("unknown_to") or {}).items()
+            for fact in facts
+        )
+        handoff_text += knowledge_text if knowledge_text.strip() != "Knowledge state:" else ""
     return (
         f"Chapter {previous_chapter.chapter_number}: {previous_chapter.title}\n"
         f"Ending excerpt:\n{previous_chapter.content[-4000:]}"
+        f"{handoff_text}"
     )
 
 

@@ -142,6 +142,8 @@ async def test_create_project_character_chapter_state_memory_and_relationship(
         source_chapter_id=chapter.id,
         character_id=heroine.id,
         content="Aria is rejected by Kael in front of Moonridge Pack.",
+        known_by=["Aria Blackwood", "Kael Thorn"],
+        unknown_to=["the hidden royal council"],
         embedding=[0.01] * EMBEDDING_DIMENSIONS,
         extra_metadata={"tropes": ["rejected_mate"]},
     )
@@ -191,6 +193,8 @@ async def test_create_project_character_chapter_state_memory_and_relationship(
     assert loaded_memory.memory_type == MemoryType.EVENT.value
     assert loaded_memory.embedding is not None
     assert len(loaded_memory.embedding) == EMBEDDING_DIMENSIONS
+    assert loaded_memory.known_by == ["Aria Blackwood", "Kael Thorn"]
+    assert loaded_memory.unknown_to == ["the hidden royal council"]
 
     mate_links = (
         await db_session.scalars(

@@ -13,13 +13,13 @@ Current implementation stage: **STEP 10 — Chapter Generation Workflow**.
 - Agent prompts live in `packages/novel-engine/prompts/agents/`.
 
 - Domain services live in `packages/novel-engine` and do not import FastAPI.
-- Persistence adapters belong in `apps/api` (SQLAlchemy UoW not wired yet).
+- Persistence adapters belong in `apps/api`; SQLAlchemy UoW is wired to the API session.
 - Human-in-the-loop: `submit_for_review` → `approve(..., confirmed_by=)` → `pipeline.advance`.
 
 - Frontend: `apps/web`
 - Backend: `apps/api`
-- Novel engine: `packages/novel-engine` (domain enums + LLM providers; no agents yet)
-- Prompt assets: `prompts/` (no hardcoded prompt strings in Python)
+- Novel engine: `packages/novel-engine` (domain services, agents, workflows, memory and LLM providers)
+- Prompt assets: `packages/novel-engine/prompts/` for agents and `prompts/` for research/provider assets
 - Migrations: `database/alembic`
 
 Persistence ORM lives in `apps/api/app/db/models/`. Domain enumerations live in `packages/novel-engine/src/novel_engine/models/enums.py`. LLM HTTP adapters live in `packages/novel-engine/src/novel_engine/providers/`.

@@ -10,7 +10,16 @@ import { api, ApiError } from "@/lib/api";
 import { confirmResource } from "@/lib/hitl";
 import { approvalStatusLabel, characterRoleLabel } from "@/lib/labels";
 import { evaluateAlphaNovelChecks } from "@/lib/platform-rules";
-import type { Chapter, ChapterPlan, ChapterPlanSuggestion, Character, Hook, MemoryItem, ScenePlan } from "@/lib/types";
+import type {
+  Chapter,
+  ChapterPlan,
+  ChapterPlanSuggestion,
+  Character,
+  ContextPackPreview,
+  Hook,
+  MemoryItem,
+  ScenePlan,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ensureCharactersForPlan, ensureWriteReady } from "@/lib/write-path";
 
@@ -75,6 +84,7 @@ export default function ChapterEditorPage() {
   const [versions, setVersions] = useState<ChapterVersion[]>([]);
   const [repetitionCheck, setRepetitionCheck] = useState<RepetitionCheck | null>(null);
   const [relevanceCheck, setRelevanceCheck] = useState<RelevanceCheck | null>(null);
+  const [contextPack, setContextPack] = useState<ContextPackPreview | null>(null);
 
   const dirty = draft !== saved;
 
@@ -148,6 +158,15 @@ export default function ChapterEditorPage() {
   }
 
   const planStatus = payload?.plan?.status || "draft";
+  const chapterStatus = payload?.chapter?.status || "draft";
+  const chapterApproved = chapterStatus === "approved" || chapterStatus === "published";
+  const manualReviewNeeded = !chapterApproved && (
+    chapterStatus === "reviewed" ||
+    auditStatus === "failed" ||
+    auditStatus === "completed_with_errors" ||
+    auditStatus === "not_configured" ||
+    auditStatus === "passed"
+  );
   const canGenerate = !dirty;
 
   async function ensurePlanApproved(): Promise<void> {
@@ -251,6 +270,14 @@ export default function ChapterEditorPage() {
     setOk("AI 章节计划已保存为新草稿版本。检查计划并批准后即可生成正文。");
   }
 
+  async function previewContextPack() {
+    const result = await api<ContextPackPreview>(
+      `/projects/${projectId}/chapters/${number}/context-pack`,
+      { projectId },
+    );
+    setContextPack(result);
+  }
+
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -263,6 +290,22 @@ export default function ChapterEditorPage() {
         </div>
       </div>
       <StatusBanner loading={loading} error={error} ok={ok} />
+      {!loading ? (
+        <p className={cn(
+          "rounded-md border px-3 py-2 text-xs",
+          chapterApproved
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            : manualReviewNeeded
+            ? "border-amber-200 bg-amber-50 text-amber-700"
+            : "bg-muted/30 text-muted-foreground",
+        )}>
+          {chapterApproved
+            ? "自动流程已完成：章节已批准，章节摘要、场景交接和人物认知已自动沉淀到故事记忆。"
+            : manualReviewNeeded
+            ? "自动流程需要人工兜底：请根据下方审查结果修订或确认本章。"
+            : "正常流程：生成正文后系统会自动执行审查；只有审查未通过时才需要人工处理。"}
+        </p>
+      ) : null}
       {!loading && characters.length === 0 ? (
         <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
           还没有角色。生成章节计划后，计划中出现的人物会逐个自动加入本书角色库。
@@ -361,6 +404,60 @@ export default function ChapterEditorPage() {
         >
           {busy === "生成本章" ? "生成中…" : "生成本章"}
         </Button>
+        {manualReviewNeeded ? <span className="self-center text-xs text-amber-700">人工兜底</span> : null}
+        {manualReviewNeeded && chapterStatus !== "reviewed" ? <Button
+          size="sm"
+          variant="outline"
+          disabled={!!busy || dirty || !draft.trim()}
+          onClick={() =>
+            void run("完成审查", async () => {
+              const result = await api<{
+                chapter: Chapter;
+                reviewed?: boolean;
+                review_status?: string;
+                continuity?: { overall: string; findings: { problem: string }[] };
+              }>(`/projects/${projectId}/chapters/${number}/review`, { method: "POST", projectId });
+              setAuditStatus(result.review_status || (result.reviewed ? "passed" : "failed"));
+              setAuditStage(result.reviewed ? "审查通过，可以批准章节" : "审查未通过，请根据问题修订正文");
+              setContinuity(
+                result.continuity
+                  ? `${result.continuity.overall}${result.continuity.findings.length ? `：${result.continuity.findings.map((item) => item.problem).join("；")}` : ""}`
+                  : null,
+              );
+              await load();
+              setOk(result.reviewed ? "章节审查通过，现在可以批准章节。" : "章节审查未通过，请先修订正文。 ");
+            })
+          }
+        >
+          {busy === "完成审查" ? "审查中…" : "完成审查"}
+        </Button> : null}
+        {manualReviewNeeded ? <Button
+          size="sm"
+          disabled={!!busy || chapterStatus !== "reviewed"}
+          title={chapterStatus !== "reviewed" ? "请先完成审查并通过" : "批准后才会写入长期故事记忆"}
+          onClick={() =>
+            void run("批准章节", async () => {
+              await api(`/projects/${projectId}/chapters/${number}/approve`, {
+                method: "POST",
+                projectId,
+                body: JSON.stringify({ confirmed_by: "studio-user" }),
+              });
+              await load();
+              setOk("章节已批准，摘要、场景交接和人物认知已写入长期记忆。 ");
+              setAuditStage("章节已批准，长期记忆已沉淀");
+            })
+          }
+        >
+          批准章节
+        </Button> : null}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!!busy}
+          onClick={() => void run("预览上下文", previewContextPack)}
+        >
+          预览生成上下文
+        </Button>
         <Button
           size="sm"
           variant="outline"
@@ -447,6 +544,55 @@ export default function ChapterEditorPage() {
       ) : null}
 
       {busy ? <p className="text-xs text-muted-foreground">{busy}… {auditStage || "正在处理"}</p> : null}
+
+      {contextPack ? (
+        <section className="space-y-2 rounded-lg border bg-muted/20 p-3 text-sm">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-medium">本章生成上下文预览</h2>
+            <Button size="sm" variant="ghost" onClick={() => setContextPack(null)}>关闭</Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            第 {contextPack.chapter_number} 章 · 预计上下文 {contextPack.memory_package.token_estimate} tokens
+            {contextPack.memory_package.dropped_for_budget
+              ? ` · 因预算省略 ${contextPack.memory_package.dropped_for_budget} 项`
+              : " · 未省略记忆"}
+          </p>
+          <div className="grid gap-2 md:grid-cols-3">
+            <div className="rounded-md border bg-background p-2">
+              <p className="text-xs font-medium">当前故事弧</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {contextPack.story_arc
+                  ? `${contextPack.story_arc.title}（${contextPack.story_arc.start_chapter_number}-${contextPack.story_arc.end_chapter_number}）`
+                  : "未匹配故事弧"}
+              </p>
+            </div>
+            <div className="rounded-md border bg-background p-2">
+              <p className="text-xs font-medium">未解决钩子</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {contextPack.memory_package.unresolved_hooks.length
+                  ? contextPack.memory_package.unresolved_hooks.join("；")
+                  : "暂无"}
+              </p>
+            </div>
+            <div className="rounded-md border bg-background p-2">
+              <p className="text-xs font-medium">禁止知识</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {Object.keys(contextPack.context.forbidden_knowledge).length
+                  ? Object.entries(contextPack.context.forbidden_knowledge)
+                      .map(([name, facts]) => `${name}：${facts.join("、")}`)
+                      .join("；")
+                  : "暂无"}
+              </p>
+            </div>
+          </div>
+          <details>
+            <summary className="cursor-pointer text-xs font-medium">查看带入记忆与伏笔</summary>
+            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-background p-2 text-xs">
+              {contextPack.visible_text}
+            </pre>
+          </details>
+        </section>
+      ) : null}
 
       {auditStage || versions.length || auditStatus || repetitionCheck || relevanceCheck ? (
         <section className="space-y-2 rounded-lg border bg-muted/20 p-3 text-sm">

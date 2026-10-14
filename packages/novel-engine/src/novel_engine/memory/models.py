@@ -55,6 +55,7 @@ class ChapterMemory(BaseModel):
     location: str | None = None
     characters: list[str] = Field(default_factory=list)
     arc: str | None = None
+    scene_handoffs: list[dict] = Field(default_factory=list)
 
 
 class TimelineMemory(BaseModel):
@@ -163,6 +164,26 @@ class ContextPackage(BaseModel):
                     *chapter.new_facts,
                 ]
             )
+            for handoff in chapter.scene_handoffs:
+                parts.extend(
+                    [
+                        str(handoff.get("what_happened") or ""),
+                        *[str(item) for item in handoff.get("character_changes") or []],
+                        *[str(item) for item in handoff.get("new_information") or []],
+                        *[str(item) for item in handoff.get("open_questions") or []],
+                        *[str(item) for item in handoff.get("next_scene_requirements") or []],
+                        *[
+                            f"{character} knows: {fact}"
+                            for character, facts in (handoff.get("who_knows") or {}).items()
+                            for fact in facts
+                        ],
+                        *[
+                            f"{character} does not know: {fact}"
+                            for character, facts in (handoff.get("unknown_to") or {}).items()
+                            for fact in facts
+                        ],
+                    ]
+                )
         for event in self.timeline_slices:
             parts.append(f"{event.location} {event.title} {event.description}")
         for character in self.character_slices:

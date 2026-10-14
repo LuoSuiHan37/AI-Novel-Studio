@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import uuid
 
 from sqlalchemy.orm.attributes import flag_modified
@@ -13,6 +14,15 @@ from novel_engine.memory.service import MemoryService
 from novel_engine.models.enums import EpistemicStatus, Importance, MemoryLayer, MemoryType
 from novel_engine.style.anti_repetition import StyleHistory
 from novel_engine.workflows.chapter_pipeline import CommitResult, ChapterGenerationPipeline
+
+
+def _dedupe_key(kind: str, owner_id: uuid.UUID, suffix: str = "") -> str:
+    return f"{kind}:{owner_id}:{suffix}"[:255]
+
+
+def _fact_dedupe_key(kind: str, chapter_id: uuid.UUID, content: str) -> str:
+    digest = hashlib.sha256(content.strip().encode("utf-8")).hexdigest()
+    return _dedupe_key(kind, chapter_id, digest)
 
 
 async def hydrate_pipeline_memory(
@@ -44,6 +54,7 @@ async def hydrate_pipeline_memory(
                     location=row.location,
                     characters=list(meta.get("characters") or []),
                     arc=meta.get("arc"),
+                    scene_handoffs=list(meta.get("scene_handoffs") or []),
                 )
             )
             continue
@@ -68,6 +79,7 @@ async def hydrate_pipeline_memory(
             memory_type=MemoryType(row.memory_type),
             importance=Importance(row.importance),
             content=row.content,
+            character_name=(row.extra_metadata or {}).get("character_name"),
             chapter_number=row.chapter_number,
             location=row.location,
             known_by=list(row.known_by or []),
@@ -136,6 +148,7 @@ async def persist_commit(
             importance=Importance.HIGH.value,
             source_chapter_id=chapter_id,
             chapter_number=result.chapter.chapter_number,
+            dedupe_key=_dedupe_key("chapter_memory", chapter_id),
             location=summary.location,
             content=summary.summary,
             tags=["chapter"],
@@ -148,6 +161,8 @@ async def persist_commit(
                 "unresolved_hooks": list(summary.unresolved_hooks),
                 "characters": list(result.timeline.characters),
                 "arc": result.chapter.story_arc_id and str(result.chapter.story_arc_id),
+                "scene_handoffs": [item.model_dump() for item in getattr(summary, "scene_handoffs", [])],
+                "memory_validation": result.memory_validation,
             },
         )
     )
@@ -159,6 +174,7 @@ async def persist_commit(
                 layer=MemoryLayer.CHARACTER.value,
                 epistemic_status=EpistemicStatus.CONFIRMED_FACT.value,
                 content=state.current_state,
+                dedupe_key=_dedupe_key("character_state", chapter_id, state.name),
                 chapter_number=result.chapter.chapter_number,
                 tags=["character_state"],
                 extra_metadata={
@@ -180,10 +196,46 @@ async def persist_commit(
                 epistemic_status=EpistemicStatus.TENTATIVE_FACT.value,
                 importance=item.importance.value,
                 content=item.content,
+                dedupe_key=_fact_dedupe_key("fact", chapter_id, item.content),
                 chapter_number=result.chapter.chapter_number,
-                extra_metadata={"kind": "fact"},
+                extra_metadata={
+                    "kind": "fact",
+                    "character_name": item.character_name,
+                    "source_excerpt": item.source_excerpt,
+                },
+                known_by=list(item.known_by),
+                unknown_to=list(item.unknown_to),
             )
         )
+    for handoff in getattr(summary, "scene_handoffs", []):
+        facts: dict[str, dict[str, list[str]]] = {}
+        for character, items in (handoff.who_knows or {}).items():
+            for fact in items:
+                facts.setdefault(fact, {}).setdefault("known_by", []).append(character)
+        for character, items in (handoff.unknown_to or {}).items():
+            for fact in items:
+                facts.setdefault(fact, {}).setdefault("unknown_to", []).append(character)
+        for fact, visibility in facts.items():
+            session.add(
+                StoryMemory(
+                    project_id=project_id,
+                    memory_type=MemoryType.FACT.value,
+                    layer=MemoryLayer.CHARACTER.value,
+                    epistemic_status=EpistemicStatus.TENTATIVE_FACT.value,
+                    importance=Importance.MEDIUM.value,
+                    source_chapter_id=chapter_id,
+                    chapter_number=result.chapter.chapter_number,
+                    content=fact,
+                    dedupe_key=_fact_dedupe_key("knowledge_boundary", chapter_id, fact),
+                    known_by=visibility.get("known_by", []),
+                    unknown_to=visibility.get("unknown_to", []),
+                    tags=["scene_handoff", f"scene:{handoff.scene_number}"],
+                    extra_metadata={
+                        "kind": "knowledge_boundary",
+                        "source_excerpt": handoff.source_excerpt,
+                    },
+                )
+            )
     session.add(
         TimelineEvent(
             project_id=project_id,
@@ -215,8 +267,9 @@ async def persist_commit(
                 project_id=project_id,
                 memory_type=MemoryType.FACT.value,
                 layer=MemoryLayer.GLOBAL.value,
-                epistemic_status=EpistemicStatus.CONFIRMED_FACT.value,
+                epistemic_status=EpistemicStatus.TENTATIVE_FACT.value,
                 content="style ledger",
+                dedupe_key=_dedupe_key("style_ledger", project_id),
                 tags=["style_ledger"],
                 extra_metadata=payload,
             )
@@ -224,4 +277,6 @@ async def persist_commit(
     else:
         existing.extra_metadata = payload
         flag_modified(existing, "extra_metadata")
-    await session.commit()
+    # The route owns the transaction so approval and memory writes commit
+    # together or roll back together.
+    await session.flush()

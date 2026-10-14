@@ -78,6 +78,8 @@ async def save_project_snapshot(engine: NovelEngine, project_id: UUID) -> Path:
                 "content": row.content,
                 "chapter_number": row.chapter_number,
                 "location": row.location,
+                "known_by": list(row.known_by or []),
+                "unknown_to": list(row.unknown_to or []),
                 "tags": list(row.tags or []),
                 "extra_metadata": row.extra_metadata or {},
             }

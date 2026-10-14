@@ -312,6 +312,9 @@ class MemoryItemOut(ApiModel):
     content: str
     chapter_number: int | None = None
     location: str | None = None
+    known_by: list[str] = Field(default_factory=list)
+    unknown_to: list[str] = Field(default_factory=list)
+    extra_metadata: dict = Field(default_factory=dict)
 
 
 class TimelineItemOut(ApiModel):

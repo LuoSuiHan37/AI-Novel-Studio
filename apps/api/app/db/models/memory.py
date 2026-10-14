@@ -61,6 +61,7 @@ class StoryMemory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("characters.id", ondelete="SET NULL"),
         index=True,
     )
+    dedupe_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     chapter_number: Mapped[int | None] = mapped_column(Integer)
     location: Mapped[str | None] = mapped_column(String(255))
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -69,6 +70,10 @@ class StoryMemory(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     tags: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     embedding = mapped_column(Vector(EMBEDDING_DIMENSIONS), nullable=True)
     extra_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "dedupe_key", name="uq_story_memories_project_dedupe_key"),
+    )
 
     project: Mapped[NovelProject] = relationship(back_populates="memories")
     source_chapter: Mapped[Chapter | None] = relationship()

@@ -138,7 +138,17 @@ export default function NovelDashboardPage() {
           ) : null}
           {audit && !audit.publishable ? (
             <p className="mt-2 text-xs text-muted-foreground">
-              缺失 {audit.missing_chapters.length} 章 · 未完成 {audit.unfinished_chapters.length} 章 · 重复 {audit.repetition_findings.length} 项 · 相关性问题 {audit.relevance_findings.length} 项
+              缺失 {audit.missing_chapters.length} 章 · 未完成 {audit.unfinished_chapters.length} 章 · 重复 {audit.repetition_findings.length} 项 · 相关性问题 {audit.relevance_findings.length} 项 · 跨章节问题 {(audit.longitudinal_findings?.length || 0) + (audit.story_state_findings?.length || 0) + (audit.plot_thread_findings?.length || 0)} 项
+            </p>
+          ) : null}
+          {audit?.memory_coverage ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              结构化记忆：{audit.memory_coverage.chapters_with_memory} / {audit.memory_coverage.approved_chapters} 个已确认章节
+            </p>
+          ) : null}
+          {audit?.plot_thread_coverage ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              剧情线状态：{audit.plot_thread_coverage.open_hooks} 个未解决钩子 · {audit.plot_thread_coverage.open_foreshadowings} 个未回收伏笔
             </p>
           ) : null}
         </div>
