@@ -3,256 +3,37 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-
+import { AlertTriangle, ArrowRight, BookOpen, CheckCircle2, CircleHelp, FileCheck2, Flag, GitBranch, Lightbulb, ListChecks, PenLine, Settings2, Sparkles } from "lucide-react";
 import { StatusBanner } from "@/components/ui-bits";
-import { buttonVariants } from "@/components/ui/button";
 import { api, ApiError } from "@/lib/api";
-import { pipelineStageLabel, projectStatusLabel } from "@/lib/labels";
-import { buildChecklist } from "@/lib/readiness";
-import type {
-  Chapter,
-  Character,
-  Foreshadowing,
-  Hook,
-  MasterPlot,
-  NovelAudit,
-  Project,
-  StoryArc,
-  StoryBible,
-  WorldBible,
-} from "@/lib/types";
+import { displayProjectTitle, formatProjectDate, projectCoverUrl } from "@/lib/project-display";
+import { genreLabel, pipelineStageLabel } from "@/lib/labels";
+import type { Chapter, Foreshadowing, Hook, MasterPlot, NovelAudit, Project, StoryArc, StoryBible, WorldBible } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+function Cover({ project }: { project: Project }) {
+  const url = projectCoverUrl(project);
+  return <div className="h-32 w-24 overflow-hidden rounded-[9px] bg-[linear-gradient(145deg,#e9f0fc,#9db5dd)]">{url ? <img src={url} alt={`${displayProjectTitle(project)}封面`} className="size-full object-cover" /> : <div className="flex size-full flex-col justify-between p-3 text-[#18345f]"><BookOpen className="size-5" /><span className="font-serif text-lg leading-tight">{displayProjectTitle(project)}</span></div>}</div>;
+}
+function Panel({ children, className }: { children: React.ReactNode; className?: string }) { return <section className={cn("rounded-[12px] border border-[#e5ebf4] bg-white shadow-[0_8px_24px_rgba(35,55,95,.045)]", className)}>{children}</section>; }
+function SectionTitle({ icon: Icon, title, action }: { icon: typeof BookOpen; title: string; action?: React.ReactNode }) { return <div className="flex items-center justify-between gap-3"><h2 className="flex items-center gap-2 text-[17px] font-semibold tracking-[-.02em] text-[#172443]"><Icon className="size-[19px] text-[#2563eb]" strokeWidth={2} />{title}</h2>{action}</div>; }
+function StatCard({ href, icon: Icon, label, value, suffix, tone }: { href: string; icon: typeof BookOpen; label: string; value: string | number; suffix?: string; tone: string }) { return <Link href={href} className="group flex min-w-0 items-center gap-3 rounded-[11px] border border-[#e5ebf4] bg-white p-4 shadow-[0_8px_24px_rgba(35,55,95,.04)] transition hover:-translate-y-0.5 hover:border-[#bfd0f5]"><span className={cn("flex size-11 shrink-0 items-center justify-center rounded-[10px]", tone)}><Icon className="size-5" /></span><span className="min-w-0 flex-1"><span className="block text-xs text-[#7d8aa1]">{label}</span><span className="mt-1 block truncate text-[24px] font-semibold leading-none tracking-[-.04em] text-[#122143]">{value}{suffix ? <small className="ml-1 text-xs font-medium tracking-normal text-[#63718a]">{suffix}</small> : null}</span></span><ArrowRight className="size-[17px] shrink-0 text-[#9dacbf]" /></Link>; }
 
 export default function NovelDashboardPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [project, setProject] = useState<Project | null>(null);
-  const [story, setStory] = useState<StoryBible | null>(null);
-  const [world, setWorld] = useState<WorldBible | null>(null);
-  const [characters, setCharacters] = useState<Character[]>([]);
-  const [plot, setPlot] = useState<MasterPlot | null>(null);
-  const [arcs, setArcs] = useState<StoryArc[]>([]);
-  const [chapters, setChapters] = useState<Chapter[]>([]);
-  const [hooks, setHooks] = useState<Hook[]>([]);
-  const [foreshadowing, setForeshadowing] = useState<Foreshadowing[]>([]);
-  const [audit, setAudit] = useState<NovelAudit | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [showChecklist, setShowChecklist] = useState(false);
+  const [project, setProject] = useState<Project | null>(null); const [story, setStory] = useState<StoryBible | null>(null); const [world, setWorld] = useState<WorldBible | null>(null); const [plot, setPlot] = useState<MasterPlot | null>(null); const [arcs, setArcs] = useState<StoryArc[]>([]); const [chapters, setChapters] = useState<Chapter[]>([]); const [hooks, setHooks] = useState<Hook[]>([]); const [foreshadowing, setForeshadowing] = useState<Foreshadowing[]>([]); const [audit, setAudit] = useState<NovelAudit | null>(null); const [error, setError] = useState<string | null>(null); const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => { const [item, storyRes, worldRes, plotRes, arcRes, chapterRes, auditRes, hookRes, foreshadowingRes] = await Promise.all([api<Project>(`/projects/${projectId}`), api<StoryBible>(`/projects/${projectId}/story`).catch(() => null), api<WorldBible>(`/projects/${projectId}/world`).catch(() => null), api<MasterPlot>(`/projects/${projectId}/plot`).catch(() => null), api<StoryArc[]>(`/projects/${projectId}/arcs`).catch(() => []), api<Chapter[]>(`/projects/${projectId}/chapters`).catch(() => []), api<NovelAudit>(`/projects/${projectId}/audit`).catch(() => null), api<Hook[]>(`/projects/${projectId}/hooks`).catch(() => []), api<Foreshadowing[]>(`/projects/${projectId}/foreshadowing`).catch(() => [])]); setProject(item); setStory(storyRes); setWorld(worldRes); setPlot(plotRes); setArcs(arcRes); setChapters(chapterRes); setAudit(auditRes); setHooks(hookRes); setForeshadowing(foreshadowingRes); }, [projectId]);
+  // Data fetching is intentionally started when the route becomes available.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load().catch((err: unknown) => setError(err instanceof ApiError ? err.message : "作品概览加载失败")).finally(() => setLoading(false)); }, [load]);
+  const latest = useMemo(() => [...chapters].sort((a, b) => new Date(b.updated_at || b.created_at || 0).getTime() - new Date(a.updated_at || a.created_at || 0).getTime() || b.chapter_number - a.chapter_number)[0] || null, [chapters]);
+  const title = displayProjectTitle(project); const target = audit?.planned_chapter_count ?? project?.chapter_count_target ?? null; const written = chapters.filter((item) => Boolean(item.content?.trim())).length; const approved = chapters.filter((item) => ["approved", "published"].includes(item.status)).length; const wordCount = chapters.reduce((sum, item) => sum + (item.word_count || item.content?.trim().length || 0), 0); const progress = target ? Math.min(100, Math.round((written / target) * 100)) : null; const currentChapter = latest?.chapter_number || null; const currentArc = arcs.find((arc) => (arc.start_chapter_number ?? 1) <= (currentChapter || 1) && (arc.end_chapter_number ?? Number.MAX_SAFE_INTEGER) >= (currentChapter || 1)) || arcs[0] || null; const nextBeat = plot?.beats?.filter((beat) => beat.chapter_hint === null || !currentChapter || beat.chapter_hint >= currentChapter).sort((a, b) => (a.chapter_hint ?? 99999) - (b.chapter_hint ?? 99999))[0] || null; const openHooks = hooks.filter((item) => !["resolved", "paid_off", "closed"].includes(item.status)); const openForeshadowing = foreshadowing.filter((item) => !["resolved", "paid_off", "closed"].includes(item.status));
+  const continueHref = latest ? `/projects/${projectId}/chapters/${latest.chapter_number}` : `/projects/${projectId}/chapters`; const issueCount = audit ? audit.repetition_findings.length + audit.relevance_findings.length + (audit.longitudinal_findings?.length || 0) + (audit.story_state_findings?.length || 0) + (audit.plot_thread_findings?.length || 0) : null; const setup = [{ label: "小说介绍", done: Boolean(story), href: `/projects/${projectId}/story` }, { label: "世界观", done: Boolean(world), href: `/projects/${projectId}/world` }, { label: "主线策划", done: Boolean(plot), href: `/projects/${projectId}/plot` }, { label: "故事弧", done: arcs.length > 0, href: `/projects/${projectId}/arcs` }]; const setupDone = setup.filter((item) => item.done).length;
 
-  const load = useCallback(async () => {
-    const [item, storyRes, worldRes, characterRes, plotRes, arcRes, chapterRes, auditRes, hookRes, foreshadowingRes] = await Promise.all([
-      api<Project>(`/projects/${projectId}`),
-      api<StoryBible>(`/projects/${projectId}/story`).catch(() => null),
-      api<WorldBible>(`/projects/${projectId}/world`).catch(() => null),
-      api<Character[]>(`/projects/${projectId}/characters`).catch(() => []),
-      api<MasterPlot>(`/projects/${projectId}/plot`).catch(() => null),
-      api<StoryArc[]>(`/projects/${projectId}/arcs`).catch(() => []),
-      api<Chapter[]>(`/projects/${projectId}/chapters`).catch(() => []),
-      api<NovelAudit>(`/projects/${projectId}/audit`).catch(() => null),
-      api<Hook[]>(`/projects/${projectId}/hooks`).catch(() => []),
-      api<Foreshadowing[]>(`/projects/${projectId}/foreshadowing`).catch(() => []),
-    ]);
-    setProject(item);
-    setStory(storyRes);
-    setWorld(worldRes);
-    setCharacters(characterRes);
-    setPlot(plotRes);
-    setArcs(arcRes);
-    setChapters(chapterRes);
-    setAudit(auditRes);
-    setHooks(hookRes);
-    setForeshadowing(foreshadowingRes);
-  }, [projectId]);
-
-  useEffect(() => {
-    load()
-      .catch((err: ApiError) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [load]);
-
-  const checklist = useMemo(
-    () =>
-      buildChecklist(projectId, {
-        story,
-        world,
-        characters,
-        plot,
-        arcs,
-        chapters,
-      }),
-    [projectId, story, world, characters, plot, arcs, chapters],
-  );
-
-  const doneCount = checklist.filter((item) => item.done).length;
-  const latest = [...chapters].sort((a, b) => b.chapter_number - a.chapter_number)[0];
-  const chapterNo = latest?.chapter_number || 1;
-  const targetChapters = audit?.planned_chapter_count ?? project?.chapter_count_target ?? null;
-  const writtenChapters = chapters.filter((chapter) => chapter.content?.trim()).length;
-  const approvedChapters = chapters.filter((chapter) => ["approved", "published"].includes(chapter.status)).length;
-  const progressPercent = targetChapters ? Math.min(100, Math.round((writtenChapters / targetChapters) * 100)) : 0;
-  const currentArc = arcs
-    .filter((arc) => (arc.start_chapter_number ?? 1) <= chapterNo && (arc.end_chapter_number ?? Number.MAX_SAFE_INTEGER) >= chapterNo)
-    .sort((left, right) => left.sequence - right.sequence)[0] ?? null;
-  const nextBeat = plot?.beats
-    .filter((beat) => beat.chapter_hint === null || beat.chapter_hint >= chapterNo)
-    .sort((left, right) => (left.chapter_hint ?? Number.MAX_SAFE_INTEGER) - (right.chapter_hint ?? Number.MAX_SAFE_INTEGER))[0] ?? null;
-  const openHooks = hooks.filter((item) => !["resolved", "paid_off", "closed"].includes(item.status));
-  const openForeshadowing = foreshadowing.filter((item) => !["resolved", "paid_off", "closed"].includes(item.status));
-
-  return (
-    <section className="mx-auto max-w-5xl space-y-6">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">{project?.title || "小说概览"}</h1>
-        {project ? (
-          <p className="text-sm text-muted-foreground">
-            {pipelineStageLabel(project.current_stage)} · {projectStatusLabel(project.status)} · 第 {chapterNo} 章
-          </p>
-        ) : null}
-      </header>
-
-      <StatusBanner loading={loading} error={error} />
-
-      {project ? (
-        <div className="rounded-xl border px-4 py-4 text-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className="font-medium">全书进度与发布审计</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                已建立 {audit?.actual_chapter_count ?? chapters.length} 章 · 已写正文 {writtenChapters} 章 · 已确认 {approvedChapters} 章
-              </p>
-            </div>
-            <span className={audit?.publishable ? "text-emerald-700" : "text-amber-700"}>
-              {audit?.publishable ? "可发布" : "暂不可发布"}
-            </span>
-          </div>
-          {targetChapters ? (
-            <div className="mt-4" aria-label={`正文完成度 ${progressPercent}%`}>
-              <div className="mb-1 flex justify-between text-xs text-muted-foreground">
-                <span>正文完成度</span>
-                <span>{writtenChapters} / {targetChapters} 章 · {progressPercent}%</span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-muted">
-                <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${progressPercent}%` }} />
-              </div>
-            </div>
-          ) : null}
-          {audit && !audit.publishable ? (
-            <p className="mt-2 text-xs text-muted-foreground">
-              缺失 {audit.missing_chapters.length} 章 · 未完成 {audit.unfinished_chapters.length} 章 · 重复 {audit.repetition_findings.length} 项 · 相关性问题 {audit.relevance_findings.length} 项 · 跨章节问题 {(audit.longitudinal_findings?.length || 0) + (audit.story_state_findings?.length || 0) + (audit.plot_thread_findings?.length || 0)} 项
-            </p>
-          ) : null}
-          {audit?.memory_coverage ? (
-            <p className="mt-2 text-xs text-muted-foreground">
-              结构化记忆：{audit.memory_coverage.chapters_with_memory} / {audit.memory_coverage.approved_chapters} 个已确认章节
-            </p>
-          ) : null}
-          {audit?.plot_thread_coverage ? (
-            <p className="mt-2 text-xs text-muted-foreground">
-              剧情线状态：{audit.plot_thread_coverage.open_hooks} 个未解决钩子 · {audit.plot_thread_coverage.open_foreshadowings} 个未回收伏笔
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {project ? (
-        <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-          <section className="rounded-xl border p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">主线位置</p>
-                <h2 className="mt-1 text-lg font-semibold">{currentArc?.title || "尚未确定故事弧"}</h2>
-              </div>
-              <Link href={`/projects/${projectId}/arcs`} className="text-xs underline underline-offset-2">查看故事弧</Link>
-            </div>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              {currentArc?.summary || "完善故事弧后，系统会在连续生成时使用对应阶段的目标和范围。"}
-            </p>
-            {currentArc ? (
-              <p className="mt-3 text-xs text-muted-foreground">
-                第 {currentArc.start_chapter_number ?? 1}–{currentArc.end_chapter_number ?? targetChapters ?? "—"} 章 · 当前在第 {chapterNo} 章
-              </p>
-            ) : null}
-            <div className="mt-4 rounded-lg bg-muted/40 p-3">
-              <p className="text-xs font-medium text-muted-foreground">下一条主线节点</p>
-              <p className="mt-1 text-sm font-medium">{nextBeat?.name || "暂无明确节点"}</p>
-              <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                {nextBeat?.description || "建议在总大纲中补充带章节范围的关键事件。"}
-              </p>
-              {nextBeat?.chapter_hint ? <p className="mt-2 text-xs text-muted-foreground">计划在第 {nextBeat.chapter_hint} 章附近推进</p> : null}
-            </div>
-          </section>
-
-          <section className="rounded-xl border p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">持续性记忆</p>
-                <h2 className="mt-1 text-lg font-semibold">需要留意的线索</h2>
-              </div>
-              <Link href={`/projects/${projectId}/hooks`} className="text-xs underline underline-offset-2">查看全部</Link>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <div className="rounded-lg border bg-muted/20 p-3">
-                <p className="text-2xl font-semibold tabular-nums">{openHooks.length}</p>
-                <p className="mt-1 text-xs text-muted-foreground">未解决钩子</p>
-              </div>
-              <div className="rounded-lg border bg-muted/20 p-3">
-                <p className="text-2xl font-semibold tabular-nums">{openForeshadowing.length}</p>
-                <p className="mt-1 text-xs text-muted-foreground">未回收伏笔</p>
-              </div>
-            </div>
-            <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-              {[...openHooks.slice(0, 2).map((item) => `钩子：${item.description}`), ...openForeshadowing.slice(0, 2).map((item) => `伏笔：${item.description}`)].map((item) => (
-                <p key={item} className="line-clamp-2">{item}</p>
-              ))}
-              {!openHooks.length && !openForeshadowing.length ? <p>目前没有待处理线索。</p> : null}
-            </div>
-          </section>
-        </div>
-      ) : null}
-
-      <div className="rounded-xl border bg-muted/20 px-5 py-5">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">现在只需一步</p>
-        <h2 className="mt-1 text-lg font-semibold">去写第 {chapterNo} 章</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          章节计划按需登记本书人物；不必提前创建所有配角。进编辑器后先生成计划。
-        </p>
-        <div className="mt-4">
-          <Link href={`/projects/${projectId}/write`} className={cn(buttonVariants(), "inline-flex")}>
-            去写第 {chapterNo} 章
-          </Link>
-        </div>
-      </div>
-
-      <button
-        type="button"
-        className="flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left text-sm"
-        onClick={() => setShowChecklist((value) => !value)}
-      >
-        <span className="font-medium">
-          设定进度 {doneCount}/{checklist.length}
-        </span>
-        <span className="text-xs text-muted-foreground">{showChecklist ? "收起" : "展开（可改设定）"}</span>
-      </button>
-      {showChecklist ? (
-        <ul className="divide-y rounded-xl border">
-          {checklist.map((item) => (
-            <li key={item.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
-              <div className="min-w-0">
-                <div className="font-medium">
-                  <span className={item.done ? "text-foreground" : "text-muted-foreground"}>
-                    {item.done ? "✓" : "○"} {item.label}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground">{item.hint}</p>
-              </div>
-              <Link href={item.href} className="shrink-0 text-xs underline underline-offset-2">
-                {item.done ? "查看" : "去完成"}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-    </section>
-  );
+  return <div className="mx-auto w-full max-w-[1360px] pb-10"><header className="flex h-[72px] items-center justify-between border-b border-[#e4eaf3] text-sm"><div className="flex min-w-0 items-center gap-2 text-[#7d8aa1]"><Link href="/projects" className="hover:text-[#2563eb]">作品库</Link><span>/</span><span className="max-w-[180px] truncate">{title}</span><span>/</span><strong className="text-[#172443]">概览</strong></div><div className="flex items-center gap-3 text-xs text-[#7d8aa1]"><span className="hidden items-center gap-1.5 sm:flex"><CheckCircle2 className="size-4 text-[#189a70]" />已保存</span><Settings2 className="size-4" /></div></header><div className="space-y-5 pt-8"><div className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="font-serif text-[34px] font-semibold leading-tight tracking-[-.04em] text-[#101c3b]">作品概览</h1><p className="mt-2 text-[15px] text-[#718099]">掌握故事进度，继续下一章</p></div><Link href={continueHref} className="inline-flex h-11 items-center gap-2 rounded-[10px] bg-[#2563eb] px-5 text-sm font-semibold text-white shadow-[0_8px_18px_rgba(37,99,235,.2)] hover:bg-[#1d4ed8]"><PenLine className="size-4" />{latest ? "继续创作" : "开始创作"}</Link></div><StatusBanner loading={loading} error={error} />
+    {project ? <Panel className="p-5 sm:p-6"><div className="grid gap-5 md:grid-cols-[96px_minmax(0,1fr)_215px] md:items-center"><Cover project={project} /><div className="min-w-0"><div className="flex flex-wrap gap-2"><span className="rounded-full bg-[#edf3ff] px-3 py-1 text-xs font-medium text-[#2563eb]">{genreLabel(project.genre)}</span>{project.tropes.slice(0, 3).map((trope) => <span key={trope} className="rounded-full bg-[#f2f5f9] px-3 py-1 text-xs text-[#63718a]">{trope}</span>)}</div><h2 className="mt-3 truncate font-serif text-[25px] font-semibold text-[#122143]">{title}</h2><p className="mt-2 line-clamp-2 text-[14px] leading-6 text-[#5f6e87]">{story?.synopsis || story?.logline || project.logline || "还没有简介，进入小说介绍完善故事设定。"}</p></div><dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 border-t border-[#eef2f7] pt-4 text-xs md:border-l md:border-t-0 md:pl-5 md:pt-0"><dt className="text-[#8995a9]">创作阶段</dt><dd className="font-medium text-[#33415e]">{pipelineStageLabel(project.current_stage)}</dd><dt className="text-[#8995a9]">目标章节</dt><dd className="font-medium text-[#33415e]">{target ? `${target} 章` : "尚未设置"}</dd><dt className="text-[#8995a9]">最近编辑</dt><dd className="font-medium text-[#33415e]">{formatProjectDate(project.updated_at)}</dd></dl></div></Panel> : null}
+    {project ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><StatCard href={`/projects/${projectId}/chapters?filter=all`} icon={BookOpen} label="已建章节" value={chapters.length} suffix="章" tone="bg-[#edf3ff] text-[#4b7ff2]" /><StatCard href={`/projects/${projectId}/chapters?filter=written`} icon={PenLine} label="已写正文" value={written} suffix="章" tone="bg-[#eefaf5] text-[#15966c]" /><StatCard href={`/projects/${projectId}/chapters?filter=approved`} icon={FileCheck2} label="已确认章节" value={approved} suffix="章" tone="bg-[#f4efff] text-[#8158d9]" /><StatCard href={`/projects/${projectId}/chapters?filter=words`} icon={ListChecks} label="总字数" value={wordCount.toLocaleString("zh-CN")} suffix="字" tone="bg-[#fff7e9] text-[#dd8a12]" /></div> : null}
+    {project ? <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(300px,.8fr)]"><div className="space-y-5"><Panel className="p-5 sm:p-6"><SectionTitle icon={ListChecks} title="全书进度" action={audit ? <span className={cn("rounded-full px-3 py-1 text-xs font-medium", audit.publishable ? "bg-[#eaf9f2] text-[#16855f]" : "bg-[#fff4df] text-[#b36a00]")}>{audit.publishable ? "检查通过" : "暂不可发布"}</span> : <span className="rounded-full bg-[#f4f6f9] px-3 py-1 text-xs text-[#8995a9]">尚未检查</span>} /><div className="mt-5 flex items-end justify-between"><div><p className="text-[23px] font-semibold text-[#122143]">{target ? `${written} / ${target} 章` : `${written} 章`}</p><p className="mt-1 text-xs text-[#8995a9]">{target ? "正文完成度" : "设置目标章节后显示完成度"}</p></div>{progress !== null ? <strong className="text-[24px] font-semibold text-[#2563eb]">{progress}%</strong> : null}</div>{progress !== null ? <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#e9eef7]"><div className="h-full rounded-full bg-[#4c82f4]" style={{ width: `${progress}%` }} /></div> : null}<div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-xs text-[#6f7d94]"><span>待补充 <b className="text-[#263552]">{target ? Math.max(0, target - written) : "—"}</b> 章</span><span>待完成 <b className="text-[#263552]">{Math.max(0, written - approved)}</b> 章</span>{audit && !audit.publishable ? <Link href={`/projects/${projectId}/chapters?filter=issues`} className="text-[#2563eb]">查看审查问题 <ArrowRight className="ml-1 inline size-3.5" /></Link> : null}</div></Panel><Panel className="p-5 sm:p-6"><SectionTitle icon={GitBranch} title="故事主线" action={<Link href={`/projects/${projectId}/plot`} className="text-xs text-[#2563eb]">查看主线 <ArrowRight className="ml-1 inline size-3.5" /></Link>} /><div className="relative mt-5 space-y-5 pl-8 before:absolute before:bottom-3 before:left-[8px] before:top-3 before:w-px before:bg-[#d8e2f3]">{currentArc ? <div className="relative"><span className="absolute -left-8 top-0 size-4 rounded-full border-4 border-[#dce8ff] bg-[#2563eb]" /><p className="text-xs font-medium text-[#2563eb]">当前阶段</p><Link href={`/projects/${projectId}/arcs`} className="mt-1 block font-semibold text-[#1d2b49]">{currentArc.title}</Link><p className="mt-1 text-sm leading-6 text-[#6b7890]">{currentArc.summary}</p></div> : <div className="relative"><span className="absolute -left-8 top-0 size-4 rounded-full border-2 border-[#b8c4d5] bg-white" /><p className="text-sm text-[#718099]">还没有故事弧</p><Link href={`/projects/${projectId}/arcs`} className="mt-1 inline-block text-xs text-[#2563eb]">去建立故事主线</Link></div>}{nextBeat ? <div className="relative"><span className="absolute -left-8 top-0 size-4 rounded-full border-2 border-[#aebbd0] bg-white" /><p className="text-xs text-[#8995a9]">下一个节点</p><p className="mt-1 font-semibold text-[#263552]">{nextBeat.name}</p><p className="mt-1 text-sm leading-6 text-[#6b7890]">{nextBeat.description}</p></div> : null}</div></Panel></div><div className="space-y-5"><Panel className="p-5"><SectionTitle icon={Flag} title="下一步" /><div className="mt-4 rounded-[10px] bg-[#f1f6ff] p-4"><p className="text-xs text-[#718099]">{latest ? `继续第 ${latest.chapter_number} 章` : "从第一章开始"}</p><h3 className="mt-2 text-[18px] font-semibold text-[#152343]">{latest?.title || (latest ? `第 ${latest.chapter_number} 章` : "创建第一章")}</h3><p className="mt-2 text-sm leading-6 text-[#64718a]">{latest ? "回到最近编辑的章节，继续完善正文。" : "先生成章节计划，再开始写作。"}</p><Link href={continueHref} className="mt-4 flex h-10 items-center justify-center gap-2 rounded-[9px] bg-[#2563eb] text-sm font-medium text-white hover:bg-[#1d4ed8]">{latest ? "进入章节" : "创建章节"}<ArrowRight className="size-4" /></Link></div></Panel><Panel className="p-5"><SectionTitle icon={AlertTriangle} title="待处理事项" action={<Link href={audit ? `/projects/${projectId}/chapters?filter=issues` : `/projects/${projectId}/chapters`} className="text-xs text-[#2563eb]">查看全部 <ArrowRight className="ml-1 inline size-3.5" /></Link>} /><div className="mt-3 divide-y divide-[#eef2f7]">{audit ? <><Link href={`/projects/${projectId}/chapters?filter=issues`} className="flex items-center justify-between py-3 text-sm text-[#42516b]"><span><CircleHelp className="mr-2 inline size-4 text-[#6e8fd9]" />审查问题</span><b className="rounded-full bg-[#ffe8e8] px-3 py-1 text-xs text-[#d64c54]">{issueCount || "无"}</b></Link><Link href={`/projects/${projectId}/chapters?filter=unapproved`} className="flex items-center justify-between py-3 text-sm text-[#42516b]"><span><FileCheck2 className="mr-2 inline size-4 text-[#6e8fd9]" />未确认章节</span><b className="rounded-full bg-[#fff4df] px-3 py-1 text-xs text-[#b36a00]">{Math.max(0, chapters.length - approved)}</b></Link></> : <div className="py-3 text-sm leading-6 text-[#718099]">尚未完成全书检查。完成章节审查后，这里会显示真实问题。</div>}</div></Panel></div></div> : null}
+    {project ? <div className="grid gap-5 lg:grid-cols-[1fr_1fr_1.15fr]"><Panel className="p-5"><SectionTitle icon={Sparkles} title="线索与伏笔" /><div className="mt-4 grid grid-cols-2 gap-3"><Link href={`/projects/${projectId}/hooks`} className="rounded-[9px] bg-[#f7f9fc] p-3"><p className="text-[22px] font-semibold text-[#172443]">{openHooks.length}</p><p className="mt-1 text-xs text-[#77859b]">未解决钩子</p></Link><Link href={`/projects/${projectId}/hooks`} className="rounded-[9px] bg-[#f7f9fc] p-3"><p className="text-[22px] font-semibold text-[#172443]">{openForeshadowing.length}</p><p className="mt-1 text-xs text-[#77859b]">未回收伏笔</p></Link></div></Panel><Panel className="p-5"><SectionTitle icon={Lightbulb} title="设定完成情况" action={<span className="text-xs text-[#16855f]">{setupDone} / 4</span>} /><div className="mt-4 h-2 overflow-hidden rounded-full bg-[#e9eef7]"><div className="h-full rounded-full bg-[#36a979]" style={{ width: `${setupDone / 4 * 100}%` }} /></div><div className="mt-4 space-y-2 text-sm text-[#596981]">{setup.map((item) => <Link key={item.label} href={item.href} className="flex items-center justify-between"><span>{item.label}</span>{item.done ? <CheckCircle2 className="size-4 text-[#1a9a70]" /> : <span className="text-xs text-[#a0aabd]">待完善</span>}</Link>)}</div></Panel><Panel className="p-5"><SectionTitle icon={BookOpen} title="作品信息" /><dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-5 gap-y-2.5 text-sm"><dt className="text-[#8995a9]">题材</dt><dd className="text-[#42516b]">{genreLabel(project.genre)}</dd><dt className="text-[#8995a9]">创作状态</dt><dd className="text-[#42516b]">{pipelineStageLabel(project.current_stage)}</dd><dt className="text-[#8995a9]">创建时间</dt><dd className="text-[#42516b]">{formatProjectDate(project.created_at)}</dd></dl></Panel></div> : null}
+  </div></div>;
 }

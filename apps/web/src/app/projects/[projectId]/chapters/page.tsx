@@ -2,14 +2,26 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BookOpen, Check, ChevronDown, ChevronRight, Clock3, FileText, MoreHorizontal, PenLine, Plus, Search, Sparkles, X } from "lucide-react";
 
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { StatusBanner } from "@/components/ui-bits";
 import { api, ApiError } from "@/lib/api";
 import { chapterStatusLabel } from "@/lib/labels";
+import { displayProjectTitle, formatProjectDate } from "@/lib/project-display";
 import type { Chapter, ChapterPlanSuggestion, Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+type CreationMode = "manual" | "ai";
+type StatusFilter = "all" | "draft" | "written" | "approved";
+type StatIcon = typeof BookOpen;
+
+const statusStyles: Record<string, string> = { draft: "bg-slate-100 text-slate-600", reviewed: "bg-amber-50 text-amber-700", approved: "bg-emerald-50 text-emerald-700", published: "bg-blue-50 text-blue-700" };
+function chapterWords(chapter: Chapter) { return chapter.word_count || chapter.content?.trim().length || 0; }
+function formatCount(value: number) { return new Intl.NumberFormat("zh-CN").format(value); }
+function excerpt(value: string, length = 180) { const compact = value.replace(/\s+/g, " ").trim(); return compact ? `${compact.slice(0, length)}${compact.length > length ? "…" : ""}` : ""; }
+function defaultPlan(number: number, title: string, goal: string, target: number): ChapterPlanSuggestion { return { chapter_number: number, chapter_title: title, pov: "", location: "", characters: [], chapter_goal: goal, conflict: "", emotional_arc: "", new_information: "", reveal: "", foreshadowing: "", setup: "", payoff: "", cliffhanger: "", target_word_count: target, scenes: [{ scene_number: 1, location: "", characters: [], goal, conflict: "", turning_point: "", dialogue_goal: "", emotion: "", information_revealed: "", ending: "", target_word_count: target }] }; }
 
 export default function ChaptersDirectoryPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -17,152 +29,48 @@ export default function ChaptersDirectoryPage() {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [suggestingTitle, setSuggestingTitle] = useState(false);
-  const [planSuggestion, setPlanSuggestion] = useState<ChapterPlanSuggestion | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [drawerError, setDrawerError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [creationMode, setCreationMode] = useState<CreationMode>("manual");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [chapterTitle, setChapterTitle] = useState("");
-  const nextNumber = useMemo(
-    () => (chapters.length ? Math.max(...chapters.map((item) => item.chapter_number)) + 1 : 1),
-    [chapters],
-  );
-  const orderedChapters = useMemo(
-    () => [...chapters].sort((a, b) => a.chapter_number - b.chapter_number),
-    [chapters],
-  );
+  const [chapterGoal, setChapterGoal] = useState("");
+  const [targetWordCount, setTargetWordCount] = useState(2000);
+  const [editablePlan, setEditablePlan] = useState<ChapterPlanSuggestion | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const newChapterButtonRef = useRef<HTMLButtonElement | null>(null);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const generationController = useRef<AbortController | null>(null);
+  const submitInFlight = useRef(false);
 
-  async function load() {
-    setLoading(true);
-    try {
-      const [loadedProject, loadedChapters] = await Promise.all([
-        api<Project>(`/projects/${projectId}`),
-        api<Chapter[]>(`/projects/${projectId}/chapters`),
-      ]);
-      setProject(loadedProject);
-      setChapters(loadedChapters);
-      // Keep the input empty so a numbering placeholder cannot be saved as
-      // the actual chapter title.
-      setChapterTitle("");
-      setPlanSuggestion(null);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "章节目录加载失败");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const nextNumber = useMemo(() => chapters.length ? Math.max(...chapters.map((item) => item.chapter_number)) + 1 : 1, [chapters]);
+  const previousChapter = useMemo(() => chapters.filter((item) => item.chapter_number < nextNumber).sort((a, b) => b.chapter_number - a.chapter_number)[0], [chapters, nextNumber]);
+  const stats = useMemo(() => { const written = chapters.filter((chapter) => Boolean(chapter.content?.trim())).length; const approved = chapters.filter((chapter) => ["approved", "published"].includes(chapter.status)).length; return { created: chapters.length, written, pending: Math.max(chapters.length - written, 0), approved, words: chapters.reduce((sum, chapter) => sum + chapterWords(chapter), 0) }; }, [chapters]);
+  const filteredChapters = useMemo(() => { const query = search.trim().toLowerCase(); return [...chapters].filter((chapter) => { const matchesSearch = !query || `${chapter.chapter_number} ${chapter.title} ${chapter.content}`.toLowerCase().includes(query); const matchesStatus = statusFilter === "all" || (statusFilter === "written" ? Boolean(chapter.content?.trim()) : statusFilter === "approved" ? ["approved", "published"].includes(chapter.status) : chapter.status === "draft"); return matchesSearch && matchesStatus; }).sort((a, b) => a.chapter_number - b.chapter_number); }, [chapters, search, statusFilter]);
 
-  useEffect(() => void load(), [projectId]);
+  async function load() { setLoading(true); setError(null); try { const [loadedProject, loadedChapters] = await Promise.all([api<Project>(`/projects/${projectId}`), api<Chapter[]>(`/projects/${projectId}/chapters`)]); setProject(loadedProject); setChapters(loadedChapters); } catch (err) { setError(err instanceof ApiError ? err.message : "章节目录加载失败"); } finally { setLoading(false); } }
+  useEffect(() => { const timer = window.setTimeout(() => { void load(); }, 0); return () => window.clearTimeout(timer); }, [projectId]);
+  useEffect(() => { if (!drawerOpen) return; const timer = window.setTimeout(() => titleInputRef.current?.focus(), 50); const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") closeDrawer(); }; window.addEventListener("keydown", onKeyDown); return () => { window.clearTimeout(timer); window.removeEventListener("keydown", onKeyDown); }; }, [drawerOpen]);
 
-  async function createNextChapter() {
-    setBusy(true);
-    setError(null);
-    try {
-      if (!planSuggestion) {
-        throw new ApiError(400, "plan_required", "请先生成 AI 章节计划");
-      }
-      await api(`/projects/${projectId}/chapters/plan`, {
-        method: "POST",
-        projectId,
-        body: JSON.stringify({
-          ...planSuggestion,
-          chapter_number: nextNumber,
-          chapter_title: chapterTitle.trim(),
-        }),
-      });
-      router.push(`/projects/${projectId}/chapters/${nextNumber}`);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "下一章创建失败");
-    } finally {
-      setBusy(false);
-    }
-  }
+  function openDrawer() { setDrawerError(null); setCreationMode("manual"); setChapterTitle(""); setChapterGoal(""); setTargetWordCount(2000); setEditablePlan(null); setAdvancedOpen(false); setDrawerOpen(true); }
+  function isDirty() { return Boolean(chapterTitle.trim() || chapterGoal.trim() || editablePlan || generating); }
+  function closeDrawer(force = false) { if (!force && isDirty() && !window.confirm("当前新章节表单尚未完成，确定放弃吗？")) return; if (generating) generationController.current?.abort(); setDrawerOpen(false); setGenerating(false); setDrawerError(null); window.setTimeout(() => newChapterButtonRef.current?.focus(), 0); }
 
-  async function suggestPlan() {
-    setSuggestingTitle(true);
-    setError(null);
-    try {
-      const result = await api<ChapterPlanSuggestion>(
-        `/projects/${projectId}/chapters/plan-suggestion`,
-        {
-          method: "POST",
-          projectId,
-          body: JSON.stringify({ chapter_number: nextNumber }),
-        },
-      );
-      setPlanSuggestion(result);
-      setChapterTitle(result.chapter_title);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "AI 章节计划生成失败");
-    } finally {
-      setSuggestingTitle(false);
-    }
-  }
+  async function suggestPlan() { if (generating || creating) return; setGenerating(true); setDrawerError(null); const controller = new AbortController(); generationController.current = controller; try { const result = await api<ChapterPlanSuggestion>(`/projects/${projectId}/chapters/plan-suggestion`, { method: "POST", projectId, body: JSON.stringify({ chapter_number: nextNumber }), signal: controller.signal }); setEditablePlan(result); setChapterTitle(result.chapter_title || chapterTitle); setChapterGoal(result.chapter_goal || chapterGoal); if (result.target_word_count) setTargetWordCount(result.target_word_count); } catch (err) { if (!controller.signal.aborted) setDrawerError(err instanceof ApiError ? err.message : "AI 章节计划生成失败，可重试"); } finally { generationController.current = null; setGenerating(false); } }
+  async function createChapter() { if (submitInFlight.current || creating || generating) return; const title = chapterTitle.trim(); if (!title) { setDrawerError("请填写章节名称"); return; } submitInFlight.current = true; setCreating(true); setDrawerError(null); try { const plan = editablePlan ? { ...editablePlan, chapter_title: title, chapter_number: nextNumber, chapter_goal: chapterGoal.trim() } : defaultPlan(nextNumber, title, chapterGoal.trim(), targetWordCount); if (creationMode === "ai" && !plan.scenes.length) throw new ApiError(400, "plan_required", "AI 计划尚未生成有效场景，请重试生成"); await api(`/projects/${projectId}/chapters/plan`, { method: "POST", projectId, body: JSON.stringify({ ...plan, target_word_count: targetWordCount }) }); closeDrawer(true); router.push(`/projects/${projectId}/chapters/${nextNumber}`); } catch (err) { setDrawerError(err instanceof ApiError ? err.message : "章节创建失败，表单内容已保留"); } finally { submitInFlight.current = false; setCreating(false); } }
+  function updatePlan(field: keyof ChapterPlanSuggestion, value: string) { setEditablePlan((current) => current ? { ...current, [field]: value } : current); }
 
-  return (
-    <section className="max-w-4xl space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">{project?.title || "当前小说"}</h1>
-          <p className="text-sm text-muted-foreground">每一章单独保存；确认后的章节会进入后续写作上下文。</p>
-        </div>
-      </div>
-      <StatusBanner loading={loading} error={error} />
-      <div className="flex max-w-2xl flex-wrap items-end gap-2 rounded-lg border bg-muted/20 p-3">
-        <div className="flex-1">
-          <label className="block space-y-1">
-            <span className="text-xs font-medium text-muted-foreground">新章节名称</span>
-            <input
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-              value={chapterTitle}
-              onChange={(event) => setChapterTitle(event.target.value)}
-              placeholder={`输入第 ${nextNumber} 章的名称，或先生成 AI 计划`}
-            />
-          </label>
-        </div>
-        <Button variant="outline" disabled={busy || suggestingTitle} onClick={() => void suggestPlan()}>
-          {suggestingTitle ? "生成计划中…" : planSuggestion ? "重新生成章节计划" : "AI 生成章节计划"}
-        </Button>
-        <Button disabled={busy || suggestingTitle || !chapterTitle.trim() || !planSuggestion} onClick={() => void createNextChapter()}>
-          {busy ? "创建中…" : `新建第 ${nextNumber} 章`}
-        </Button>
-      </div>
-      {planSuggestion ? (
-        <div className="max-w-2xl space-y-2 rounded-lg border p-3 text-sm">
-          <h2 className="font-medium">AI 章节计划预览</h2>
-          <p><span className="font-medium">目标：</span>{planSuggestion.chapter_goal}</p>
-          <p><span className="font-medium">冲突：</span>{planSuggestion.conflict}</p>
-          <p><span className="font-medium">情绪变化：</span>{planSuggestion.emotional_arc}</p>
-          <p><span className="font-medium">章末钩子：</span>{planSuggestion.cliffhanger}</p>
-          <ol className="list-inside list-decimal space-y-1 text-xs text-muted-foreground">
-            {planSuggestion.scenes.map((scene) => (
-              <li key={scene.scene_number}>{scene.goal}；冲突：{scene.conflict}；转折：{scene.turning_point}</li>
-            ))}
-          </ol>
-        </div>
-      ) : null}
-      <div className="overflow-hidden rounded-lg border">
-        {orderedChapters.map((chapter) => (
-            <Link
-              key={chapter.id}
-              href={`/projects/${projectId}/chapters/${chapter.chapter_number}`}
-              className="flex items-center justify-between border-b px-4 py-3 last:border-b-0 hover:bg-muted/40"
-            >
-              <div>
-                <div className="font-medium">
-                  第 {chapter.chapter_number} 章 · {chapter.title === `Chapter ${chapter.chapter_number}` && chapter.chapter_number === 1 ? "The Rejection" : chapter.title || "未命名章节"}
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">{chapter.word_count} 词</div>
-              </div>
-              <span className="text-xs text-muted-foreground">{chapterStatusLabel(chapter.status)}</span>
-            </Link>
-          ))}
-        {!loading && chapters.length === 0 ? (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground">还没有章节，从第 1 章开始。</div>
-        ) : null}
-      </div>
-      <Link href={`/projects/${projectId}/story`} className={cn(buttonVariants({ variant: "outline", size: "sm" }), "inline-flex")}>
-        先完善小说简介与总设定
-      </Link>
-    </section>
-  );
+  return <section className="relative min-w-0 space-y-6">
+    <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="mb-2 text-sm text-muted-foreground">作品库 / {displayProjectTitle(project)} / <span className="text-foreground">章节目录</span></p><h1 className="text-3xl font-semibold tracking-tight text-foreground">章节目录</h1><p className="mt-1 text-sm text-muted-foreground">管理章节计划、正文与确认状态。</p></div><Button ref={newChapterButtonRef} size="lg" onClick={openDrawer}><Plus /> 新建章节</Button></div>
+    <StatusBanner loading={loading} error={error} />
+    {!loading && !error ? <>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">{([[BookOpen, "已创建章节", stats.created, project?.chapter_count_target ? `/ ${project.chapter_count_target}` : ""], [PenLine, "已写章节", stats.written, ""], [Clock3, "待写章节", stats.pending, ""], [Check, "已确认章节", stats.approved, ""], [FileText, "总字数", stats.words, "词"]] as [StatIcon, string, number, string][]).map(([Icon, label, value, suffix]) => <div key={String(label)} className="rounded-xl border border-border/70 bg-white p-4 shadow-sm"><Icon className="mb-3 size-5 text-primary" /><div className="text-xs text-muted-foreground">{label}</div><div className="mt-1 text-xl font-semibold">{formatCount(value)}<span className="ml-1 text-xs font-normal text-muted-foreground">{suffix}</span></div></div>)}</div>
+      <div className="rounded-2xl border border-border/70 bg-white shadow-sm"><div className="flex flex-wrap items-center gap-3 border-b border-border/60 p-4"><div className="relative min-w-[220px] flex-1"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索章节名称或正文关键词" className="h-9 w-full rounded-lg border border-input bg-background pl-9 pr-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50" /></div><div className="flex flex-wrap gap-2">{([["all", `全部 ${stats.created}`], ["written", `已写 ${stats.written}`], ["draft", `待写 ${stats.pending}`], ["approved", `已确认 ${stats.approved}`]] as [StatusFilter, string][]).map(([value, label]) => <button key={value} type="button" onClick={() => setStatusFilter(value)} className={cn("rounded-lg border px-3 py-2 text-xs font-medium transition", statusFilter === value ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-muted/50")}>{label}</button>)}</div></div><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-sm"><thead className="bg-slate-50/80 text-left text-xs text-muted-foreground"><tr><th className="px-5 py-3 font-medium">章节</th><th className="px-4 py-3 font-medium">状态</th><th className="px-4 py-3 font-medium">字数</th><th className="px-4 py-3 font-medium">最近编辑</th><th className="px-5 py-3 text-right font-medium">操作</th></tr></thead><tbody>{filteredChapters.map((chapter) => <tr key={chapter.id} className="border-t border-border/50 transition hover:bg-blue-50/30"><td className="px-5 py-4"><Link href={`/projects/${projectId}/chapters/${chapter.chapter_number}`} className="group flex items-center gap-3"><span className="w-14 shrink-0 text-xs text-muted-foreground">第 {chapter.chapter_number} 章</span><span className="font-medium group-hover:text-primary">{chapter.title || "未命名章节"}</span><ChevronRight className="size-4 text-muted-foreground opacity-0 transition group-hover:opacity-100" /></Link></td><td className="px-4 py-4"><span className={cn("rounded-full px-2.5 py-1 text-xs", statusStyles[chapter.status] || "bg-slate-100 text-slate-600")}>{chapterStatusLabel(chapter.status)}</span></td><td className="px-4 py-4 text-muted-foreground">{formatCount(chapterWords(chapter))}</td><td className="px-4 py-4 text-muted-foreground">{formatProjectDate(chapter.updated_at)}</td><td className="px-5 py-4 text-right"><div className="inline-flex items-center gap-1"><Link aria-label={`编辑第 ${chapter.chapter_number} 章`} href={`/projects/${projectId}/chapters/${chapter.chapter_number}`} className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"><PenLine className="size-4" /></Link><button type="button" aria-label={`第 ${chapter.chapter_number} 章更多操作`} className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"><MoreHorizontal className="size-4" /></button></div></td></tr>)}</tbody></table></div>{!filteredChapters.length ? <div className="px-6 py-14 text-center"><BookOpen className="mx-auto mb-3 size-8 text-muted-foreground/50" /><p className="font-medium">{chapters.length ? "没有匹配的章节" : "还没有章节"}</p><p className="mt-1 text-sm text-muted-foreground">{chapters.length ? "试试调整搜索关键词或状态筛选。" : "从右上角新建第一章，章节正文会在写作区继续完成。"}</p></div> : null}</div>
+    </> : null}
+    {drawerOpen ? <div className="fixed inset-0 z-40 bg-slate-950/20" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDrawer(); }}><aside role="dialog" aria-modal="true" aria-labelledby="create-chapter-title" className="absolute inset-y-0 right-0 flex w-full max-w-[440px] flex-col border-l border-border bg-white shadow-2xl max-lg:max-w-none"><div className="flex items-center justify-between border-b border-border/70 px-6 py-5"><div><h2 id="create-chapter-title" className="text-xl font-semibold">新建章节</h2><p className="mt-1 text-xs text-muted-foreground">第 {nextNumber} 章 · 序号由现有章节自动计算</p></div><button type="button" onClick={() => closeDrawer()} className="rounded-lg p-2 text-muted-foreground hover:bg-muted" aria-label="关闭"><X className="size-5" /></button></div><div className="flex-1 space-y-5 overflow-y-auto px-6 py-6"><label className="block space-y-2"><span className="text-sm font-medium">章节名称</span><div className="relative"><input ref={titleInputRef} value={chapterTitle} onChange={(event) => setChapterTitle(event.target.value)} maxLength={50} placeholder="输入章节名称" className="h-11 w-full rounded-lg border border-input px-3 pr-12 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50" /><span className="absolute right-3 top-3 text-xs text-muted-foreground">{chapterTitle.length}/50</span></div></label><div className="space-y-2"><span className="text-sm font-medium">创作方式</span><div className="grid grid-cols-2 gap-3"><button type="button" onClick={() => setCreationMode("manual")} className={cn("rounded-xl border p-3 text-left", creationMode === "manual" ? "border-primary bg-blue-50/60" : "border-border")}><span className="text-sm font-medium">手动创建</span><span className="mt-1 block text-xs text-muted-foreground">填写章节信息后进入写作</span></button><button type="button" onClick={() => setCreationMode("ai")} className={cn("rounded-xl border p-3 text-left", creationMode === "ai" ? "border-primary bg-blue-50/60" : "border-border")}><Sparkles className="mb-1 size-4 text-primary" /><span className="text-sm font-medium">AI 生成计划</span><span className="mt-1 block text-xs text-muted-foreground">先预览，再确认创建</span></button></div></div>{previousChapter ? <div className="rounded-xl bg-slate-50 p-4"><div className="flex items-center gap-2 text-sm font-medium"><FileText className="size-4 text-muted-foreground" />上一章：第 {previousChapter.chapter_number} 章《{previousChapter.title || "未命名章节"}》</div><p className="mt-2 text-xs leading-5 text-muted-foreground">{excerpt(previousChapter.content) || "上一章暂无正文摘要；可根据章节计划继续。"}</p></div> : <div className="rounded-xl bg-slate-50 p-4 text-sm text-muted-foreground">这是第一章，暂无上一章信息。</div>}<label className="block space-y-2"><span className="text-sm font-medium">章节目标 <span className="font-normal text-muted-foreground">（可选）</span></span><textarea value={chapterGoal} onChange={(event) => setChapterGoal(event.target.value)} maxLength={300} rows={4} placeholder="描述本章的核心剧情、事件或希望呈现的内容" className="w-full resize-none rounded-lg border border-input px-3 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50" /></label><label className="block space-y-2"><span className="text-sm font-medium">目标字数</span><select value={targetWordCount} onChange={(event) => setTargetWordCount(Number(event.target.value))} className="h-11 w-full rounded-lg border border-input bg-white px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"><option value={1500}>1,500 词</option><option value={2000}>2,000 词（默认）</option><option value={3000}>3,000 词</option><option value={5000}>5,000 词</option></select></label><button type="button" onClick={() => setAdvancedOpen((value) => !value)} className="flex w-full items-center justify-between rounded-lg bg-slate-50 px-4 py-3 text-sm font-medium"><span>更多设置</span><ChevronDown className={cn("size-4 transition", advancedOpen && "rotate-180")} /></button>{advancedOpen ? <div className="rounded-lg border border-border/70 p-4 text-xs leading-5 text-muted-foreground">高级计划字段会在章节写作区继续维护，包括视角、地点、角色、冲突、伏笔与章末钩子。</div> : null}{creationMode === "ai" ? <div className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/50 p-4"><div className="flex items-center justify-between"><span className="text-sm font-medium text-blue-950">AI 计划预览</span><Button variant="outline" size="sm" disabled={generating || creating} onClick={() => void suggestPlan()}><Sparkles />{generating ? "生成中…" : editablePlan ? "重新生成" : "生成计划"}</Button></div>{editablePlan ? <div className="space-y-2 text-xs"><label className="block"><span className="text-muted-foreground">目标</span><textarea value={editablePlan.chapter_goal} onChange={(event) => { updatePlan("chapter_goal", event.target.value); setChapterGoal(event.target.value); }} rows={2} className="mt-1 w-full rounded-md border border-blue-100 bg-white px-2 py-1.5" /></label><p className="text-muted-foreground">场景数：{editablePlan.scenes.length} · 冲突：{editablePlan.conflict || "未设置"}</p><p className="text-muted-foreground">章末钩子：{editablePlan.cliffhanger || "未设置"}</p></div> : <p className="text-xs leading-5 text-muted-foreground">生成后会在这里展示可编辑的计划，不会自动覆盖已有章节。</p>}</div> : null}{drawerError ? <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{drawerError}</div> : null}</div><div className="flex shrink-0 gap-3 border-t border-border/70 bg-white px-6 py-4"><Button variant="outline" className="flex-1" disabled={creating} onClick={() => closeDrawer()}>取消</Button><Button className="flex-1" disabled={creating || generating || !chapterTitle.trim() || (creationMode === "ai" && !editablePlan)} onClick={() => void createChapter()}>{creating ? "创建中…" : creationMode === "ai" ? "确认并进入写作" : "创建并进入写作"}</Button></div></aside></div> : null}
+  </section>;
 }

@@ -7,13 +7,30 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_engine
+from app.api.deps import get_engine, get_llm_provider
 from app.api.schemas import LLMSettingsOut, LLMSettingsPatch
 from app.db.models.llm import LLMConfig
 from novel_engine.domain.errors import NotFoundError
+from novel_engine.providers.base import LLMProvider
+from novel_engine.providers.types import ChatMessage
 from novel_engine.services.engine import NovelEngine
 
 router = APIRouter(tags=["settings"])
+
+
+@router.post("/projects/{project_id}/settings/llm/test")
+async def test_llm_settings(
+    project_id: UUID,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+    provider: Annotated[LLMProvider, Depends(get_llm_provider)],
+) -> dict[str, str]:
+    """Make a real provider request with request headers; do not persist anything."""
+    await engine.get_project(project_id)
+    result = await provider.generate(
+        [ChatMessage(role="user", content="Reply with exactly: connection ok")],
+        temperature=0,
+    )
+    return {"status": "ok", "provider": result.provider, "model": result.model}
 
 
 @router.get("/projects/{project_id}/settings/llm")

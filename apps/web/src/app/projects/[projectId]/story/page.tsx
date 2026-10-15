@@ -2,253 +2,55 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
-
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Field, StatusBanner } from "@/components/ui-bits";
+import { useEffect, useMemo, useState } from "react";
+import { BookOpen, ChevronDown, ChevronUp, Info, Plus, Save, Sparkles, UserRound, WandSparkles, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { StatusBanner } from "@/components/ui-bits";
 import { api, ApiError } from "@/lib/api";
 import { DEFAULT_STORY } from "@/lib/defaults";
 import { confirmResource, tryAdvancePipeline } from "@/lib/hitl";
-import { approvalStatusLabel } from "@/lib/labels";
+import { displayProjectTitle, formatProjectDate, projectCoverUrl } from "@/lib/project-display";
+import { approvalStatusLabel, genreLabel } from "@/lib/labels";
 import type { Project, StoryBible } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+type StoryForm = typeof DEFAULT_STORY;
+type Tab = "basic" | "publish" | "creative";
+
+const inputClass = "h-10 w-full rounded-[8px] border border-[#dbe3ef] bg-white px-3 text-sm text-[#1d2b49] outline-none transition placeholder:text-[#a4afbf] focus:border-[#7da3f5] focus:ring-3 focus:ring-[#2563eb]/10";
+const textareaClass = "min-h-28 w-full resize-y rounded-[8px] border border-[#dbe3ef] bg-white px-3 py-2.5 text-sm leading-6 text-[#1d2b49] outline-none transition placeholder:text-[#a4afbf] focus:border-[#7da3f5] focus:ring-3 focus:ring-[#2563eb]/10";
+
+function Panel({ children, className }: { children: React.ReactNode; className?: string }) { return <section className={cn("rounded-[12px] border border-[#e5ebf4] bg-white shadow-[0_8px_24px_rgba(35,55,95,.045)]", className)}>{children}</section>; }
+function Label({ children, hint }: { children: React.ReactNode; hint?: string }) { return <span className="mb-1.5 block text-[13px] font-medium text-[#40506b]">{children}{hint ? <small className="ml-2 font-normal text-[#9aa6b8]">{hint}</small> : null}</span>; }
+function TextInput({ label, value, onChange, placeholder, hint }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string; hint?: string }) { return <label className="block"><Label hint={hint}>{label}</Label><input className={inputClass} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} /></label>; }
+function SelectInput({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: Array<[string, string]> }) { return <label className="block"><Label>{label}</Label><select className={inputClass} value={value} onChange={(event) => onChange(event.target.value)}>{options.map(([id, text]) => <option key={id} value={id}>{text}</option>)}</select></label>; }
+function TextAreaInput({ label, value, onChange, rows = 4, hint }: { label: string; value: string; onChange: (value: string) => void; rows?: number; hint?: string }) { return <label className="block"><Label hint={hint}>{label}</Label><textarea className={textareaClass} rows={rows} value={value} onChange={(event) => onChange(event.target.value)} /></label>; }
+function SectionHeading({ title, description }: { title: string; description: string }) { return <div className="mb-5"><h2 className="text-[18px] font-semibold tracking-[-.02em] text-[#172443]">{title}</h2><p className="mt-1 text-xs leading-5 text-[#7d8aa1]">{description}</p></div>; }
+
+function TagEditor({ tags, onChange }: { tags: string[]; onChange: (tags: string[]) => void }) {
+  const [draft, setDraft] = useState("");
+  function add(value: string) { const next = value.trim(); if (!next) return; onChange(Array.from(new Set([...tags, next]))); setDraft(""); }
+  return <div><Label>作品标签</Label><div className="flex min-h-10 flex-wrap items-center gap-2 rounded-[8px] border border-[#dbe3ef] bg-white px-2.5 py-1.5 focus-within:border-[#7da3f5] focus-within:ring-3 focus-within:ring-[#2563eb]/10">{tags.map((tag) => <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-[#edf3ff] px-2.5 py-1 text-xs font-medium text-[#3266c7]">{tag}<button type="button" aria-label={`删除标签 ${tag}`} className="rounded-full hover:bg-[#dbe7ff]" onClick={() => onChange(tags.filter((item) => item !== tag))}><X className="size-3" /></button></span>)}<input className="min-w-24 flex-1 border-0 bg-transparent px-1 py-1 text-sm outline-none" value={draft} placeholder={tags.length ? "添加标签" : "输入标签后回车"} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); add(draft); } }} /></div><button type="button" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-[#2563eb]" onClick={() => add(draft)}><Plus className="size-3.5" />添加标签</button></div>;
+}
+
+function Preview({ project, form, title, status }: { project: Project | null; form: StoryForm; title: string; status: string }) {
+  const cover = project ? projectCoverUrl(project) : null; const tags = Array.from(new Set([genreLabel(project?.genre || ""), ...form.tropes, ...form.reading_tags, ...form.content_tags].filter(Boolean))).slice(0, 8); const synopsis = form.synopsis.trim();
+  return <Panel className="overflow-hidden"><div className="flex items-center justify-between border-b border-[#eef2f7] px-5 py-4"><h2 className="text-[17px] font-semibold text-[#172443]">发布预览</h2><span className="inline-flex items-center gap-1 rounded-full bg-[#eefaf4] px-2.5 py-1 text-xs font-medium text-[#16855f]"><span className="size-1.5 rounded-full bg-[#1a9a70]" />仅预览</span></div><div className="p-5"><div className="relative mx-auto aspect-[3/4] max-w-[260px] overflow-hidden rounded-[10px] border border-[#dce4ef] bg-[linear-gradient(145deg,#e9f0fc,#9db5dd)] shadow-[0_12px_24px_rgba(24,51,95,.12)]">{cover ? <img src={cover} alt="作品封面预览" className="size-full object-cover" /> : <div className="flex size-full flex-col justify-between p-5 text-[#18345f]"><BookOpen className="size-7" /><span className="font-serif text-2xl leading-tight">{title || "未命名作品"}</span></div>}</div><div className="mt-5"><h3 className="font-serif text-[25px] font-semibold tracking-[-.03em] text-[#122143]">{title || "未命名作品"}</h3><div className="mt-3 flex flex-wrap gap-2">{tags.length ? tags.map((tag) => <span key={tag} className="rounded-full bg-[#edf3ff] px-2.5 py-1 text-xs font-medium text-[#396ac7]">{tag}</span>) : <span className="text-xs text-[#9aa6b8]">尚未添加标签</span>}</div><p className="mt-4 flex items-center gap-2 text-sm text-[#63718a]"><UserRound className="size-4" />{project?.extra_metadata?.author && typeof project.extra_metadata.author === "string" ? project.extra_metadata.author : "未设置作者"}</p><div className="my-4 h-px bg-[#eef2f7]" /><p className="whitespace-pre-wrap text-sm leading-7 text-[#5b6a83]">{synopsis || "还没有简介，编辑左侧内容后将在这里同步显示。"}</p></div><p className="mt-6 text-center text-xs text-[#9aa6b8]">状态：{approvalStatusLabel(status)} · 修改后需要保存</p></div></Panel>;
+}
+
 export default function StoryPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [form, setForm] = useState(DEFAULT_STORY);
-  const [status, setStatus] = useState<string>("draft");
-  const [error, setError] = useState<string | null>(null);
-  const [ok, setOk] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [projectTitle, setProjectTitle] = useState("");
-  const [suggestedTitle, setSuggestedTitle] = useState("");
-  const [suggestingTitle, setSuggestingTitle] = useState(false);
-  const [applyingTitle, setApplyingTitle] = useState(false);
+  const [project, setProject] = useState<Project | null>(null); const [form, setForm] = useState<StoryForm>(DEFAULT_STORY); const [title, setTitle] = useState(""); const [genre, setGenre] = useState("western_fantasy"); const [status, setStatus] = useState("draft"); const [tab, setTab] = useState<Tab>("basic"); const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [ok, setOk] = useState<string | null>(null); const [suggestedTitle, setSuggestedTitle] = useState(""); const [suggestingTitle, setSuggestingTitle] = useState(false); const [showAi, setShowAi] = useState(false); const [platformOpen, setPlatformOpen] = useState(false); const [savedSnapshot, setSavedSnapshot] = useState("");
+  const snapshot = useMemo(() => JSON.stringify({ title, genre, form }), [title, genre, form]); const dirty = Boolean(savedSnapshot) && snapshot !== savedSnapshot; const synopsisLength = form.synopsis.trim().length; const protagonistNames = Array.isArray(form.protagonist_names) ? [...form.protagonist_names, "", ""].slice(0, 2) : ["", ""];
+  const genres: Array<[string, string]> = [["western_fantasy", "西方奇幻"], ["fantasy_romance", "玄幻言情"], ["mystery", "悬疑推理"], ["science_fiction", "科幻"], ["contemporary_romance", "现代言情"], ["werewolf_romance", "狼人罗曼史"]];
 
-  useEffect(() => {
-    Promise.all([api<StoryBible>(`/projects/${projectId}/story`), api<Project>(`/projects/${projectId}`)])
-      .then(([bible, project]) => {
-        setProjectTitle(project.title);
-        const submission = bible.extra_metadata?.fanqie_submission || {};
-        setForm({
-          ...DEFAULT_STORY,
-          ...bible,
-          tropes: bible.tropes,
-          logline: bible.logline || "",
-          synopsis: bible.synopsis || "",
-          target_reader: submission.target_reader || DEFAULT_STORY.target_reader,
-          reading_tags: submission.reading_tags || [],
-          content_tags: submission.content_tags || [],
-          protagonist_names: submission.protagonist_names || [],
-        });
-        setStatus(bible.status);
-      })
-      .catch(() => undefined)
-      .finally(() => setLoading(false));
-  }, [projectId]);
+  useEffect(() => { let active = true; Promise.all([api<StoryBible>(`/projects/${projectId}/story`), api<Project>(`/projects/${projectId}`)]).then(([bible, loadedProject]) => { if (!active) return; const submission = bible.extra_metadata?.fanqie_submission || {}; const nextForm: StoryForm = { ...DEFAULT_STORY, ...bible, tropes: Array.isArray(bible.tropes) ? bible.tropes : [], logline: bible.logline || "", synopsis: bible.synopsis || "", target_reader: submission.target_reader || DEFAULT_STORY.target_reader, reading_tags: submission.reading_tags || [], content_tags: submission.content_tags || [], protagonist_names: submission.protagonist_names || [] }; setProject(loadedProject); setTitle(loadedProject.title || ""); setGenre(loadedProject.genre); setForm(nextForm); setStatus(bible.status); setSavedSnapshot(JSON.stringify({ title: loadedProject.title || "", genre: loadedProject.genre, form: nextForm })); }).catch((err: unknown) => { if (active) setError(err instanceof ApiError ? err.message : "小说介绍加载失败"); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, [projectId]);
+  useEffect(() => { function warn(event: BeforeUnloadEvent) { if (!dirty) return; event.preventDefault(); event.returnValue = ""; } window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn); }, [dirty]);
+  function update<K extends keyof StoryForm>(key: K, value: StoryForm[K]) { setForm((current) => ({ ...current, [key]: value })); setOk(null); }
+  function updateTags(key: "reading_tags" | "content_tags" | "tropes", values: string[]) { update(key, Array.from(new Set(values.filter(Boolean).map((item) => item.trim()).filter(Boolean))) as StoryForm[typeof key]); }
+  async function suggestTitle() { setSuggestingTitle(true); setError(null); setOk(null); try { const result = await api<{ title: string; available: boolean }>(`/projects/${projectId}/title-suggestion`, { method: "POST", projectId }); setSuggestedTitle(result.title); setOk(result.available ? "已生成可用候选书名，请确认后再写入表单。" : "已生成候选书名，请确认是否采用。 "); } catch (err) { setError(err instanceof ApiError ? err.message : "AI 起名失败"); } finally { setSuggestingTitle(false); } }
+  async function save() { if (synopsisLength < 50 || synopsisLength > 500) { setError(`作品简介需要 50–500 字，当前为 ${synopsisLength} 字。`); setTab("publish"); return; } if (protagonistNames.some((name) => name.length > 5)) { setError("每个主角名字不超过 5 个字。 "); setTab("basic"); return; } setBusy(true); setError(null); setOk(null); try { const savedProject = await api<Project>(`/projects/${projectId}`, { method: "PATCH", projectId, body: JSON.stringify({ title: title.trim() || null, genre, tropes: form.tropes }) }); const saved = await api<StoryBible>(`/projects/${projectId}/story`, { method: "PATCH", projectId, body: JSON.stringify({ premise: form.premise, theme: form.theme, tone: form.tone, narrative_style: form.narrative_style, pov: form.pov, tense: form.tense, target_word_count: form.target_word_count, chapter_word_count: form.chapter_word_count, romance_level: form.romance_level, violence_level: form.violence_level, heat_level: form.heat_level, tropes: form.tropes, logline: form.logline || null, synopsis: form.synopsis || null, target_reader: form.target_reader, reading_tags: form.reading_tags, content_tags: form.content_tags, protagonist_names: protagonistNames.filter(Boolean) }) }); setProject(savedProject); setTitle(savedProject.title || ""); setStatus(saved.status); if (saved.status !== "approved") { await confirmResource(`/projects/${projectId}/story/submit`, `/projects/${projectId}/story/approve`, projectId); const approvedStory = await api<StoryBible>(`/projects/${projectId}/story`); setStatus(approvedStory.status); } await tryAdvancePipeline(projectId); const nextSnapshot = JSON.stringify({ title: savedProject.title || "", genre: savedProject.genre, form }); setSavedSnapshot(nextSnapshot); setOk("已保存修改，故事设定流程已更新。 "); } catch (err) { setError(err instanceof ApiError ? err.message : "保存失败"); } finally { setBusy(false); } }
+  const tabItems: Array<[Tab, string]> = [["basic", "基本信息"], ["publish", "发布简介"], ["creative", "创作设定"]];
 
-  function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
-    setForm((current) => ({ ...current, [key]: value }));
-  }
-
-  async function suggestNewTitle() {
-    setSuggestingTitle(true);
-    setError(null);
-    setOk(null);
-    try {
-      const result = await api<{ title: string; available: boolean }>(
-        `/projects/${projectId}/title-suggestion`,
-        { method: "POST", projectId },
-      );
-      setSuggestedTitle(result.title);
-      setOk(result.available ? "已生成新的可用书名，请确认是否采用。" : "已生成新书名，但仍可能与平台已有书名重复，请再次生成。");
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "AI 重新定义书名失败");
-    } finally {
-      setSuggestingTitle(false);
-    }
-  }
-
-  async function applyNewTitle() {
-    if (!suggestedTitle.trim()) return;
-    setApplyingTitle(true);
-    setError(null);
-    try {
-      const project = await api<Project>(`/projects/${projectId}`, {
-        method: "PATCH",
-        projectId,
-        body: JSON.stringify({ title: suggestedTitle.trim() }),
-      });
-      setProjectTitle(project.title);
-      setSuggestedTitle("");
-      setOk("新书名已保存。提交番茄前仍建议在平台侧再次确认重名。 ");
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "保存新书名失败");
-    } finally {
-      setApplyingTitle(false);
-    }
-  }
-
-  async function saveAndConfirm() {
-    const synopsisLength = String(form.synopsis || "").trim().length;
-    const protagonistNames = Array.isArray(form.protagonist_names)
-      ? form.protagonist_names.filter(Boolean)
-      : [];
-    if (synopsisLength < 50 || synopsisLength > 500) {
-      setError(`番茄作品简介需要 50–500 字，当前为 ${synopsisLength} 字。`);
-      return;
-    }
-    if (protagonistNames.length > 2 || protagonistNames.some((name) => name.length > 5)) {
-      setError("最多填写两位主角，每个名字不超过 5 个字。 ");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const saved = await api<StoryBible>(`/projects/${projectId}/story`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          premise: form.premise,
-          theme: form.theme,
-          tone: form.tone,
-          narrative_style: form.narrative_style,
-          pov: form.pov,
-          tense: form.tense,
-          target_word_count: form.target_word_count,
-          chapter_word_count: form.chapter_word_count,
-          romance_level: form.romance_level,
-          violence_level: form.violence_level,
-          heat_level: form.heat_level,
-          tropes: String(form.tropes)
-            .split(",")
-            .map((item) => item.trim())
-            .filter(Boolean),
-          logline: form.logline || null,
-          synopsis: form.synopsis || null,
-          target_reader: form.target_reader,
-          reading_tags: form.reading_tags,
-          content_tags: form.content_tags,
-          protagonist_names: protagonistNames,
-        }),
-        projectId,
-      });
-      setStatus(saved.status);
-      if (saved.status !== "approved") {
-        await confirmResource(
-          `/projects/${projectId}/story/submit`,
-          `/projects/${projectId}/story/approve`,
-          projectId,
-        );
-        const bible = await api<StoryBible>(`/projects/${projectId}/story`);
-        setStatus(bible.status);
-      }
-      await tryAdvancePipeline(projectId);
-      setOk("故事圣经已保存，已自动确定。可回概览看下一步。");
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "保存失败");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const synopsisLength = String(form.synopsis || "").trim().length;
-  const protagonistNames = Array.isArray(form.protagonist_names) ? form.protagonist_names : ["", ""];
-  const tagText = (value: unknown) => Array.isArray(value) ? value.join(", ") : "";
-
-  return (
-    <section className="max-w-3xl space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h1 className="text-2xl font-semibold">故事圣经</h1>
-          <p className="text-sm font-medium">当前书名：{projectTitle || "加载中…"}</p>
-          <p className="text-sm text-muted-foreground">
-            状态：{approvalStatusLabel(status)} · 保存后自动进入后续流程
-          </p>
-        </div>
-        <Link href={`/projects/${projectId}`} className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "inline-flex")}>
-          回概览
-        </Link>
-      </div>
-      <StatusBanner loading={loading} error={error} ok={ok} />
-      <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="font-semibold">书名重复？让 AI 重新定义</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              AI 会读取当前作品简介、主题、标签和已生成章节，再提出贴合作品的新书名；不会重新生成故事。
-            </p>
-          </div>
-          <Button variant="outline" disabled={suggestingTitle || loading} onClick={() => void suggestNewTitle()}>
-            {suggestingTitle ? "结合章节分析中…" : "AI 重新定义书名"}
-          </Button>
-        </div>
-        {suggestedTitle ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-background p-3">
-            <span className="text-sm">建议书名：</span>
-            <span className="font-semibold">{suggestedTitle}</span>
-            <Button size="sm" disabled={applyingTitle} onClick={() => void applyNewTitle()}>
-              {applyingTitle ? "保存中…" : "采用此书名"}
-            </Button>
-            <Button size="sm" variant="ghost" disabled={suggestingTitle} onClick={() => void suggestNewTitle()}>
-              再生成一个
-            </Button>
-          </div>
-        ) : null}
-      </div>
-      <div className="rounded-lg border border-border bg-muted/30 p-4">
-        <h2 className="font-semibold">番茄新书介绍</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          以下字段对应番茄创建新书页面；内部创作字段仍保留在下方，不会混用。
-        </p>
-      </div>
-      <label className="block space-y-1">
-        <span className="text-xs font-medium text-muted-foreground">目标读者</span>
-        <select
-          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-          value={form.target_reader}
-          onChange={(event) => set("target_reader", event.target.value)}
-        >
-          <option value="male">男频</option>
-          <option value="female">女频</option>
-        </select>
-      </label>
-      <Field
-        label="阅读标签（逗号分隔）"
-        value={tagText(form.reading_tags)}
-        onChange={(value) => set("reading_tags", value.split(",").map((item) => item.trim()).filter(Boolean))}
-      />
-      <Field
-        label="内容标签（逗号分隔）"
-        value={tagText(form.content_tags)}
-        onChange={(value) => set("content_tags", value.split(",").map((item) => item.trim()).filter(Boolean))}
-      />
-      <div className="grid gap-3 md:grid-cols-2">
-        <Field label="主角名 1（最多 5 字）" value={protagonistNames[0] || ""} onChange={(value) => set("protagonist_names", [value, protagonistNames[1] || ""].filter(Boolean))} />
-        <Field label="主角名 2（最多 5 字）" value={protagonistNames[1] || ""} onChange={(value) => set("protagonist_names", [protagonistNames[0] || "", value].filter(Boolean))} />
-      </div>
-      <div>
-        <Field label="作品简介（50–500 字；不能出现低俗、暴力、血腥等违规内容）" value={form.synopsis || ""} onChange={(v) => set("synopsis", v)} multiline rows={7} />
-        <p className={`mt-1 text-right text-xs ${synopsisLength < 50 || synopsisLength > 500 ? "text-destructive" : "text-muted-foreground"}`}>
-          {synopsisLength}/500
-        </p>
-      </div>
-      <div className="border-t pt-5">
-        <h2 className="font-semibold">内部故事圣经</h2>
-        <p className="mt-1 text-sm text-muted-foreground">这些字段服务 AI 长篇创作，不直接提交为番茄作品简介。</p>
-      </div>
-      <Field label="Premise（前提）" value={form.premise} onChange={(v) => set("premise", v)} multiline rows={4} />
-      <Field label="Theme（主题）" value={form.theme} onChange={(v) => set("theme", v)} />
-      <Field label="Tone（基调）" value={form.tone} onChange={(v) => set("tone", v)} />
-      <Field label="Logline（一句话）" value={form.logline || ""} onChange={(v) => set("logline", v)} />
-      <Field
-        label="Tropes（逗号分隔）"
-        value={Array.isArray(form.tropes) ? form.tropes.join(", ") : ""}
-        onChange={(v) => set("tropes", v.split(",").map((item) => item.trim()).filter(Boolean))}
-      />
-      <Button disabled={busy} onClick={() => void saveAndConfirm()}>
-        {busy ? "保存中…" : "保存"}
-      </Button>
-    </section>
-  );
+  return <div className="mx-auto w-full max-w-[1360px] pb-10"><header className="flex min-h-[72px] items-center justify-between gap-4 border-b border-[#e4eaf3]"><div className="flex min-w-0 items-center gap-2 text-sm text-[#7d8aa1]"><Link href="/projects" className="hover:text-[#2563eb]">作品库</Link><span>/</span><Link href={`/projects/${projectId}`} className="max-w-[160px] truncate hover:text-[#2563eb]">{displayProjectTitle(project)}</Link><span>/</span><strong className="text-[#172443]">小说介绍</strong></div><div className="flex items-center gap-2"><span className={cn("mr-2 hidden text-xs sm:inline", busy ? "text-[#c27a00]" : dirty ? "text-[#c27a00]" : ok ? "text-[#16855f]" : "text-[#8995a9]")}>{busy ? "保存中…" : dirty ? "未保存" : ok ? "已保存" : "编辑中"}</span><Button variant="outline" className="h-10 border-[#b9cdf8] text-[#2563eb]" disabled={loading || suggestingTitle} onClick={() => setShowAi((value) => !value)}><Sparkles className="size-4" />AI 辅助</Button><Button className="h-10 bg-[#2563eb] px-4 hover:bg-[#1d4ed8]" disabled={loading || busy} onClick={() => void save()}><Save className="size-4" />{busy ? "保存中…" : "保存修改"}</Button></div></header><div className="space-y-5 pt-8"><div><h1 className="font-serif text-[34px] font-semibold leading-tight tracking-[-.04em] text-[#101c3b]">小说介绍</h1><p className="mt-2 text-[15px] text-[#718099]">编辑作品信息与发布简介</p></div><StatusBanner loading={loading} error={error} ok={ok} />{showAi ? <Panel className="border-[#cbdcff] bg-[#f7faff] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="flex items-center gap-2 text-sm font-semibold text-[#20345c]"><WandSparkles className="size-4 text-[#2563eb]" />AI 辅助</p><p className="mt-1 text-xs text-[#718099]">候选结果不会自动覆盖当前书名，采用后仍需点击“保存修改”。</p></div><Button variant="outline" size="sm" disabled={suggestingTitle} onClick={() => void suggestTitle()}>{suggestingTitle ? "生成中…" : "AI 起名"}</Button></div>{suggestedTitle ? <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[8px] border border-[#dbe6fb] bg-white p-3"><span className="text-xs text-[#7d8aa1]">候选书名</span><strong className="text-sm text-[#172443]">{suggestedTitle}</strong><Button size="sm" onClick={() => { setTitle(suggestedTitle); setSuggestedTitle(""); setOk("候选书名已采用到编辑区，请保存修改。 "); }}>采用</Button><Button variant="ghost" size="sm" onClick={() => void suggestTitle()}>再生成</Button></div> : null}</Panel> : null}<div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.85fr)_minmax(300px,1fr)]"><div className="min-w-0"><Panel className="overflow-hidden"><div className="flex overflow-x-auto border-b border-[#e8edf5] px-4 sm:px-6">{tabItems.map(([id, label]) => <button key={id} type="button" className={cn("relative shrink-0 px-4 py-4 text-sm font-medium text-[#74829a]", tab === id && "text-[#2563eb] after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-[#2563eb]")} onClick={() => setTab(id)}>{label}</button>)}</div><div className="space-y-7 p-5 sm:p-7">{tab === "basic" ? <><SectionHeading title="基本信息" description="这些内容会作为作品的公开身份与阅读入口。" /><div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_auto]"><TextInput label="作品名称" value={title} onChange={setTitle} placeholder="请输入作品名称" /><div className="flex items-end"><Button variant="outline" className="h-10 border-[#b9cdf8] text-[#2563eb]" disabled={suggestingTitle} onClick={() => { setShowAi(true); void suggestTitle(); }}><Sparkles className="size-4" />AI 起名</Button></div></div><div className="grid gap-5 md:grid-cols-2"><SelectInput label="作品类型" value={genre} onChange={setGenre} options={genres} /><SelectInput label="目标读者" value={form.target_reader} onChange={(value) => update("target_reader", value)} options={[["male", "男频"], ["female", "女频"]]} /></div><TagEditor tags={form.tropes} onChange={(values) => updateTags("tropes", values)} /><div className="border-t border-[#eef2f7] pt-6"><SectionHeading title="主要角色" description="主角信息只在这里维护，并同步到发布预览。" /><div className="grid gap-5 md:grid-cols-2"><TextInput label="主角一" value={protagonistNames[0]} onChange={(value) => update("protagonist_names", [value, protagonistNames[1]].filter(Boolean))} /><TextInput label="主角二" value={protagonistNames[1]} onChange={(value) => update("protagonist_names", [protagonistNames[0], value].filter(Boolean))} /></div></div></> : null}{tab === "publish" ? <><SectionHeading title="发布简介" description="预览只反映当前编辑值，不代表已经发布到平台。" /><TextAreaInput label="作品简介" hint="50–500 字，保存时会执行真实校验" value={form.synopsis} onChange={(value) => update("synopsis", value)} rows={8} /><div className="flex items-center justify-between text-xs"><span className={synopsisLength >= 50 && synopsisLength <= 500 ? "text-[#16855f]" : "text-[#d46a4f]"}>{synopsisLength >= 50 && synopsisLength <= 500 ? "长度符合要求" : "需要 50–500 字"}</span><span className="text-[#8995a9]">{synopsisLength}/500</span></div><div className="grid gap-5 md:grid-cols-2"><TextInput label="一句话简介" value={form.logline} onChange={(value) => update("logline", value)} /><TextInput label="作者" value={project?.extra_metadata?.author && typeof project.extra_metadata.author === "string" ? project.extra_metadata.author : ""} onChange={() => undefined} placeholder="未设置作者" hint="当前接口暂无作者写入字段" /></div><TagEditor tags={form.reading_tags} onChange={(values) => updateTags("reading_tags", values)} /><TagEditor tags={form.content_tags} onChange={(values) => updateTags("content_tags", values)} /><details open={platformOpen} onToggle={(event) => setPlatformOpen(event.currentTarget.open)} className="rounded-[9px] bg-[#f5f8fd] p-4"><summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-[#31466e] [&::-webkit-details-marker]:hidden"><span className="flex items-center gap-2"><Info className="size-4 text-[#2563eb]" />番茄发布规范</span>{platformOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}</summary><p className="mt-3 text-xs leading-6 text-[#6f7d94]">简介需保持 50–500 字；保存前会校验长度与主角姓名长度。平台敏感内容仍需在发布前由作者自行复核。</p></details></> : null}{tab === "creative" ? <><SectionHeading title="创作设定" description="这些字段服务 AI 长篇创作；修改已批准设定后会重新进入原有确认流程。" /><div className="grid gap-5 md:grid-cols-2"><TextAreaInput label="Premise（前提）" value={form.premise} onChange={(value) => update("premise", value)} /><TextAreaInput label="Theme（主题）" value={form.theme} onChange={(value) => update("theme", value)} /><TextInput label="Tone（基调）" value={form.tone} onChange={(value) => update("tone", value)} /><TextInput label="叙事风格" value={form.narrative_style} onChange={(value) => update("narrative_style", value)} /><SelectInput label="视角" value={form.pov} onChange={(value) => update("pov", value)} options={[["third_limited", "第三人称限知"], ["first_person", "第一人称"]]} /><SelectInput label="时态" value={form.tense} onChange={(value) => update("tense", value)} options={[["past", "过去时"], ["present", "现在时"]]} /><SelectInput label="浪漫强度" value={form.romance_level} onChange={(value) => update("romance_level", value)} options={[["low", "低"], ["medium", "中"], ["high", "高"]]} /><SelectInput label="暴力强度" value={form.violence_level} onChange={(value) => update("violence_level", value)} options={[["low", "低"], ["medium", "中"], ["high", "高"]]} /><SelectInput label="亲密强度" value={form.heat_level} onChange={(value) => update("heat_level", value)} options={[["low", "低"], ["medium", "中"], ["high", "高"]]} /><TextInput label="目标总字数" value={String(form.target_word_count)} onChange={(value) => update("target_word_count", Number(value) || 0)} /><TextInput label="每章目标字数" value={String(form.chapter_word_count)} onChange={(value) => update("chapter_word_count", Number(value) || 0)} /></div><TextAreaInput label="Logline（一句话故事线）" value={form.logline} onChange={(value) => update("logline", value)} rows={3} /></> : null}</div><div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#eef2f7] bg-[#fbfcfe] px-5 py-3.5 sm:px-7"><span className="text-xs text-[#8995a9]">{dirty ? "有未保存修改" : ok ? `已保存 ${formatProjectDate(project?.updated_at)}` : "编辑内容会保留在当前页面"}</span><Button className="bg-[#2563eb] hover:bg-[#1d4ed8]" disabled={loading || busy} onClick={() => void save()}><Save className="size-4" />{busy ? "保存中…" : "保存修改"}</Button></div></Panel></div><div className="lg:sticky lg:top-5"><Preview project={project} form={form} title={title} status={status} /></div></div></div></div>;
 }

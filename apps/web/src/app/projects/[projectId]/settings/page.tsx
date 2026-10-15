@@ -2,316 +2,51 @@
 
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-
+import { Check, ChevronDown, Eye, EyeOff, KeyRound, LoaderCircle, Save, ShieldCheck, TestTube2, Trash2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Field, StatusBanner } from "@/components/ui-bits";
-import {
-  api,
-  ApiError,
-  getStoredLlmKey,
-  setProjectLlmPrefs,
-  setStoredLlmKey,
-} from "@/lib/api";
-import {
-  getProviderPreset,
-  LLM_PROVIDER_PRESETS,
-  resolvePresetModel,
-} from "@/lib/llm-presets";
+import { api, ApiError, getStoredLlmKey, setProjectLlmPrefs, setStoredLlmKey } from "@/lib/api";
+import { getProviderPreset, LLM_PROVIDER_PRESETS, resolvePresetModel } from "@/lib/llm-presets";
 import type { CreativeProfile, LlmSettings, Project } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
-const selectCls =
-  "w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
-const textareaCls =
-  "min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
+type Tab = "model" | "creative";
+type TestState = "idle" | "testing" | "success" | "error";
+const emptyProfile: CreativeProfile = { reader_promise: "", novel_constitution: { core_question: "", reader_promise: "", ending_direction: "", themes: [], hard_constraints: [], forbidden_treatments: [], motifs: [] }, environment_bible: { geography: "", time_and_climate: "", sensory_palette: [], social_pressures: [], daily_life_details: [], recurring_locations: [], environmental_constraints: [], recurring_motifs: [] }, character_dynamics: [], relationship_rules: [], literary_review_rubric: [], rhythm_controls: [], hard_constraints: [], chapter_requirements: [], anti_ai_rules: [], style_guide: "" };
+const lines = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+function normalizeProfile(raw: unknown): CreativeProfile { const value = raw && typeof raw === "object" ? raw as Record<string, unknown> : {}; const c = value.novel_constitution && typeof value.novel_constitution === "object" ? value.novel_constitution as Record<string, unknown> : {}; const e = value.environment_bible && typeof value.environment_bible === "object" ? value.environment_bible as Record<string, unknown> : {}; return { ...emptyProfile, ...value, reader_promise: String(value.reader_promise || value.positioning || ""), novel_constitution: { ...emptyProfile.novel_constitution, ...c, themes: lines(c.themes), hard_constraints: lines(c.hard_constraints), forbidden_treatments: lines(c.forbidden_treatments), motifs: lines(c.motifs) }, environment_bible: { ...emptyProfile.environment_bible, ...e, sensory_palette: lines(e.sensory_palette), social_pressures: lines(e.social_pressures), daily_life_details: lines(e.daily_life_details), recurring_locations: lines(e.recurring_locations), environmental_constraints: lines(e.environmental_constraints), recurring_motifs: lines(e.recurring_motifs) }, character_dynamics: lines(value.character_dynamics), relationship_rules: lines(value.relationship_rules), literary_review_rubric: lines(value.literary_review_rubric), rhythm_controls: lines(value.rhythm_controls), hard_constraints: lines(value.hard_constraints), chapter_requirements: lines(value.chapter_requirements), anti_ai_rules: lines(value.anti_ai_rules), style_guide: String(value.style_guide || "") }; }
 
-const emptyProfile: CreativeProfile = {
-  reader_promise: "",
-  novel_constitution: {
-    core_question: "",
-    reader_promise: "",
-    ending_direction: "",
-    themes: [],
-    hard_constraints: [],
-    forbidden_treatments: [],
-    motifs: [],
-  },
-  environment_bible: {
-    geography: "",
-    time_and_climate: "",
-    sensory_palette: [],
-    social_pressures: [],
-    daily_life_details: [],
-    recurring_locations: [],
-    environmental_constraints: [],
-    recurring_motifs: [],
-  },
-  character_dynamics: [],
-  relationship_rules: [],
-  literary_review_rubric: [],
-  rhythm_controls: [],
-  hard_constraints: [],
-  chapter_requirements: [],
-  anti_ai_rules: [],
-  style_guide: "",
-};
-
-function lines(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-}
-
-function normalizeProfile(raw: unknown): CreativeProfile {
-  const value = raw && typeof raw === "object" ? (raw as Record<string, any>) : {};
-  const constitution = value.novel_constitution || {};
-  const environment = value.environment_bible || {};
-  return {
-    ...emptyProfile,
-    ...value,
-    reader_promise: String(value.reader_promise || value.positioning || ""),
-    novel_constitution: {
-      ...emptyProfile.novel_constitution,
-      ...constitution,
-      themes: lines(constitution.themes),
-      hard_constraints: lines(constitution.hard_constraints),
-      forbidden_treatments: lines(constitution.forbidden_treatments),
-      motifs: lines(constitution.motifs),
-    },
-    environment_bible: {
-      ...emptyProfile.environment_bible,
-      ...environment,
-      sensory_palette: lines(environment.sensory_palette),
-      social_pressures: lines(environment.social_pressures),
-      daily_life_details: lines(environment.daily_life_details),
-      recurring_locations: lines(environment.recurring_locations),
-      environmental_constraints: lines(environment.environmental_constraints),
-      recurring_motifs: lines(environment.recurring_motifs),
-    },
-    character_dynamics: lines(value.character_dynamics),
-    relationship_rules: lines(value.relationship_rules),
-    literary_review_rubric: lines(value.literary_review_rubric),
-    rhythm_controls: lines(value.rhythm_controls),
-    hard_constraints: lines(value.hard_constraints),
-    chapter_requirements: lines(value.chapter_requirements),
-    anti_ai_rules: lines(value.anti_ai_rules),
-    style_guide: String(value.style_guide || ""),
-  };
-}
-
-function TextArea({ label, value, onChange, hint }: { label: string; value: string; onChange: (value: string) => void; hint?: string }) {
-  return (
-    <label className="block space-y-1">
-      <span className="text-xs font-medium text-muted-foreground">{label}</span>
-      {hint ? <span className="block text-xs text-muted-foreground">{hint}</span> : null}
-      <textarea className={textareaCls} value={value} onChange={(event) => onChange(event.target.value)} />
-    </label>
-  );
-}
-
-function LinesEditor({ label, values, onChange, hint }: { label: string; values: string[]; onChange: (values: string[]) => void; hint?: string }) {
-  return (
-    <TextArea
-      label={label}
-      hint={hint || "每行一条。"}
-      value={values.join("\n")}
-      onChange={(value) => onChange(value.split("\n").map((item) => item.trim()).filter(Boolean))}
-    />
-  );
-}
+function Panel({ children, className }: { children: React.ReactNode; className?: string }) { return <section className={cn("rounded-[12px] border border-[#e2e8f1] bg-white shadow-[0_8px_24px_rgba(35,55,95,.045)]", className)}>{children}</section>; }
+function Dot({ tone = "neutral" }: { tone?: "neutral" | "success" | "danger" | "loading" }) { return <span className={cn("inline-block size-2.5 rounded-full", tone === "success" ? "bg-[#20a778]" : tone === "danger" ? "bg-[#db5f5f]" : tone === "loading" ? "animate-pulse bg-[#2563eb]" : "bg-[#a7b2c4]")} />; }
+function Field({ label, value, onChange, hint, type = "text", readOnly = false, multiline = false }: { label: string; value: string; onChange?: (value: string) => void; hint?: string; type?: "text" | "password"; readOnly?: boolean; multiline?: boolean }) { const [visible, setVisible] = useState(false); return <label className="block space-y-1.5"><span className="text-[13px] font-semibold text-[#25365a]">{label}</span>{hint ? <span className="block text-xs leading-5 text-[#8491a7]">{hint}</span> : null}<div className="relative">{multiline ? <textarea rows={4} value={value} readOnly={readOnly} onChange={(event) => onChange?.(event.target.value)} className="min-h-24 w-full resize-y rounded-[8px] border border-[#d6dfec] bg-white px-3.5 py-2.5 text-[14px] leading-6 text-[#172443] outline-none transition focus:border-[#7ba3ff] focus:ring-3 focus:ring-[#2563eb]/10 read-only:bg-[#f8fafc]" /> : <input type={type === "password" && !visible ? "password" : "text"} value={value} readOnly={readOnly} onChange={(event) => onChange?.(event.target.value)} autoComplete={type === "password" ? "new-password" : undefined} className="h-11 w-full rounded-[8px] border border-[#d6dfec] bg-white px-3.5 text-[14px] text-[#172443] outline-none transition focus:border-[#7ba3ff] focus:ring-3 focus:ring-[#2563eb]/10 read-only:bg-[#f8fafc]" />}{type === "password" && !multiline ? <button type="button" aria-label={visible ? "隐藏输入" : "显示输入"} onClick={() => setVisible((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8090aa]">{visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button> : null}</div></label>; }
+function SelectField({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: React.ReactNode }) { return <label className="block space-y-1.5"><span className="text-[13px] font-semibold text-[#25365a]">{label}</span><div className="relative"><select value={value} onChange={(e) => onChange(e.target.value)} className="h-11 w-full appearance-none rounded-[8px] border border-[#d6dfec] bg-white px-3.5 pr-10 text-[14px] text-[#172443] outline-none focus:border-[#7ba3ff] focus:ring-3 focus:ring-[#2563eb]/10">{children}</select><ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-[#7f8ca2]" /></div></label>; }
+function LinesField({ label, values, onChange, hint }: { label: string; values: string[]; onChange: (values: string[]) => void; hint?: string }) { return <Field label={label} hint={hint || "每行一条"} value={values.join("\n")} multiline onChange={(value) => onChange(value.split("\n").map((item) => item.trim()).filter(Boolean))} />; }
 
 export default function ProjectSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [provider, setProvider] = useState("deepseek");
-  const [model, setModel] = useState("deepseek-chat");
-  const [baseUrl, setBaseUrl] = useState("https://api.deepseek.com/v1");
-  const [envName, setEnvName] = useState("DEEPSEEK_API_KEY");
-  const [apiKey, setApiKey] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [ok, setOk] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [profile, setProfile] = useState<CreativeProfile>(emptyProfile);
-  const [creativeSaving, setCreativeSaving] = useState(false);
+  const [tab, setTab] = useState<Tab>("model"); const [project, setProject] = useState<Project | null>(null); const [provider, setProvider] = useState("deepseek"); const [model, setModel] = useState("deepseek-chat"); const [baseUrl, setBaseUrl] = useState("https://api.deepseek.com/v1"); const [envName, setEnvName] = useState("DEEPSEEK_API_KEY"); const [keyDraft, setKeyDraft] = useState(""); const [hasStoredKey, setHasStoredKey] = useState(false); const [clearKey, setClearKey] = useState(false); const [profile, setProfile] = useState<CreativeProfile>(emptyProfile); const [loading, setLoading] = useState(true); const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle"); const [testState, setTestState] = useState<TestState>("idle"); const [message, setMessage] = useState<string | null>(null); const [error, setError] = useState<string | null>(null); const [advanced, setAdvanced] = useState(false); const [hasUnsaved, setHasUnsaved] = useState(false);
+  const preset = useMemo(() => getProviderPreset(provider), [provider]); const completion = [profile.novel_constitution.core_question, profile.reader_promise, profile.novel_constitution.ending_direction, profile.style_guide].filter(Boolean).length; const dirty = hasUnsaved;
+  useEffect(() => { let active = true; Promise.all([api<LlmSettings>(`/projects/${projectId}/settings/llm`), api<Project>(`/projects/${projectId}`)]).then(([row, current]) => { if (!active) return; const next = row.provider || "deepseek"; const p = getProviderPreset(next); const m = resolvePresetModel(next, row.model); setProvider(next); setModel(m); setBaseUrl(row.base_url || p.baseUrl); setEnvName(row.api_key_env_name || p.envName); setHasStoredKey(Boolean(getStoredLlmKey(next))); setProject(current); setProfile(normalizeProfile(current.extra_metadata?.creative_profile)); setProjectLlmPrefs(projectId, { provider: next, model: m, baseUrl: row.base_url || p.baseUrl }); }).catch((err) => setError(err instanceof ApiError ? err.message : "设置加载失败")).finally(() => setLoading(false)); return () => { active = false; }; }, [projectId]);
+  useEffect(() => { const handler = (event: BeforeUnloadEvent) => { if (dirty) { event.preventDefault(); event.returnValue = ""; } }; window.addEventListener("beforeunload", handler); return () => window.removeEventListener("beforeunload", handler); }, [dirty]);
+  function invalidateTest() { setTestState("idle"); setMessage(null); setError(null); setHasUnsaved(true); }
+  function applyProvider(next: string) { const p = getProviderPreset(next); setProvider(next); setModel(p.defaultModel); setBaseUrl(p.baseUrl); setEnvName(p.envName); setKeyDraft(""); setClearKey(false); setHasStoredKey(Boolean(getStoredLlmKey(next))); invalidateTest(); }
+  function updateProfile(next: CreativeProfile) { setProfile(next); setSaveState("idle"); setHasUnsaved(true); }
+  function updateC(key: keyof CreativeProfile["novel_constitution"], value: string | string[]) { updateProfile({ ...profile, novel_constitution: { ...profile.novel_constitution, [key]: value } }); }
+  function updateE(key: keyof CreativeProfile["environment_bible"], value: string | string[]) { updateProfile({ ...profile, environment_bible: { ...profile.environment_bible, [key]: value } }); }
+  async function testConnection() { setTestState("testing"); setError(null); setMessage(null); try { await api(`/projects/${projectId}/settings/llm/test`, { method: "POST", projectId, headers: { "X-LLM-Provider": provider, "X-LLM-Model": model, "X-LLM-Base-Url": baseUrl.trim(), ...(keyDraft.trim() ? { "X-LLM-Api-Key": keyDraft.trim() } : {}) }, body: "{}" }); setTestState("success"); setMessage("连接成功。测试使用当前表单值，尚未保存修改。"); } catch (err) { setTestState("error"); setError(err instanceof ApiError ? err.message : "连接失败，请检查网络、认证信息和模型配置"); } }
+  async function saveAll() { setSaveState("saving"); setError(null); setMessage(null); try { await api(`/projects/${projectId}/settings/llm`, { method: "PATCH", projectId, body: JSON.stringify({ provider, model, base_url: baseUrl.trim() || null, api_key_env_name: envName || null }) }); await api(`/projects/${projectId}`, { method: "PATCH", projectId, body: JSON.stringify({ creative_profile: profile }) }); if (clearKey) setStoredLlmKey("", provider); else if (keyDraft.trim()) setStoredLlmKey(keyDraft.trim(), provider); setHasStoredKey(!clearKey && Boolean(keyDraft.trim() || hasStoredKey)); setKeyDraft(""); setClearKey(false); setProjectLlmPrefs(projectId, { provider, model, baseUrl: baseUrl.trim() }); setHasUnsaved(false); setSaveState("saved"); setMessage("已保存修改。模型连接与本书创作内核均已更新。"); } catch (err) { setSaveState("error"); setError(err instanceof ApiError ? err.message : "保存失败，请稍后重试"); } }
+  function clearStoredKey() { if (window.confirm(`确认清除 ${preset.label} 的浏览器 API Key？`)) { setClearKey(true); setKeyDraft(""); invalidateTest(); } }
+  const keySource = clearKey ? "未配置" : keyDraft.trim() ? "本次输入" : hasStoredKey ? "浏览器配置" : "未配置";
+  const statusText = testState === "success" ? "连接成功" : testState === "error" ? "连接失败" : testState === "testing" ? "正在连接" : "未测试";
+  const statusTone = testState === "success" ? "success" : testState === "error" ? "danger" : testState === "testing" ? "loading" : "neutral";
 
-  const preset = useMemo(() => getProviderPreset(provider), [provider]);
-
-  useEffect(() => {
-    Promise.all([api<LlmSettings>(`/projects/${projectId}/settings/llm`), api<Project>(`/projects/${projectId}`)])
-      .then(([row, project]) => {
-        const nextProvider = row.provider || "deepseek";
-        const nextPreset = getProviderPreset(nextProvider);
-        const nextModel = resolvePresetModel(nextProvider, row.model);
-        setProvider(nextProvider);
-        setModel(nextModel);
-        setBaseUrl(row.base_url || nextPreset.baseUrl);
-        setEnvName(row.api_key_env_name || nextPreset.envName);
-        setApiKey(getStoredLlmKey(nextProvider));
-        setProjectLlmPrefs(projectId, {
-          provider: nextProvider,
-          model: nextModel,
-          baseUrl: row.base_url || nextPreset.baseUrl,
-        });
-        const metadata = project.extra_metadata || {};
-        setProfile(normalizeProfile(metadata.creative_profile));
-      })
-      .catch(() => {
-        setApiKey(getStoredLlmKey("deepseek"));
-      })
-      .finally(() => setLoading(false));
-  }, [projectId]);
-
-  function applyProvider(next: string) {
-    const nextPreset = getProviderPreset(next);
-    setProvider(next);
-    setModel(nextPreset.defaultModel);
-    setBaseUrl(nextPreset.baseUrl);
-    setEnvName(nextPreset.envName);
-    setApiKey(getStoredLlmKey(next));
-    setOk(null);
-  }
-
-  async function saveCreativeProfile() {
-    setError(null);
-    setOk(null);
-    setCreativeSaving(true);
-    try {
-      await api(`/projects/${projectId}`, {
-        method: "PATCH",
-        projectId,
-        body: JSON.stringify({ creative_profile: profile }),
-      });
-      setOk("已保存书级创作内核。后续构思、规划、写作和审核会继承这些规则。");
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "创作内核保存失败");
-    } finally {
-      setCreativeSaving(false);
-    }
-  }
-
-  async function save() {
-    setError(null);
-    setOk(null);
-    try {
-      await api(`/projects/${projectId}/settings/llm`, {
-        method: "PATCH",
-        projectId,
-        body: JSON.stringify({
-          provider,
-          model,
-          base_url: baseUrl.trim() || null,
-          api_key_env_name: envName || null,
-        }),
-      });
-      setStoredLlmKey(apiKey.trim(), provider);
-      setProjectLlmPrefs(projectId, {
-        provider,
-        model,
-        baseUrl: baseUrl.trim(),
-      });
-      setOk(
-        `已保存：写作时将使用 ${preset.label} / ${model}。API Key 仅存在本浏览器，通过请求头发送，不会写入数据库。`,
-      );
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "保存失败");
-    }
-  }
-
-  return (
-    <section className="max-w-4xl space-y-6">
-      <h1 className="text-2xl font-semibold">AI 设置</h1>
-      <p className="text-sm text-muted-foreground">
-        选择善于写小说的模型并填写对应 API Key，章节生成与编辑会按该配置调用。
-      </p>
-      <StatusBanner loading={loading} error={error} ok={ok} />
-
-      <label className="block space-y-1">
-        <span className="text-xs font-medium text-muted-foreground">提供商 Provider</span>
-        <select
-          className={selectCls}
-          value={provider}
-          onChange={(e) => applyProvider(e.target.value)}
-        >
-          {LLM_PROVIDER_PRESETS.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.label}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label className="block space-y-1">
-        <span className="text-xs font-medium text-muted-foreground">模型 Model</span>
-        <select
-          className={selectCls}
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-        >
-          {preset.models.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.label}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <Field label="Base URL（可留空使用默认）" value={baseUrl} onChange={setBaseUrl} />
-      <Field label="服务端 Key 环境变量名" value={envName} onChange={setEnvName} />
-      <Field
-        label={`${preset.label} API Key（仅浏览器）`}
-        value={apiKey}
-        onChange={setApiKey}
-      />
-      <p className="text-xs text-muted-foreground">
-        模型列表为各家当前较适合长篇网文/创意写作的固定选项；Key 按提供商分开保存。
-      </p>
-      <Button onClick={() => void save()}>保存</Button>
-
-      <div className="border-t pt-6">
-        <h2 className="text-xl font-semibold">书级创作内核</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          这里定义的是这一本小说的独立规则。AI 会把它注入大纲、章节计划、正文和文学审核，避免不同小说互相污染。
-        </p>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <TextArea label="核心问题" value={profile.novel_constitution.core_question} onChange={(value) => setProfile({ ...profile, novel_constitution: { ...profile.novel_constitution, core_question: value } })} hint="这本书最终要追问什么人生问题？" />
-        <TextArea label="读者承诺" value={profile.reader_promise} onChange={(value) => setProfile({ ...profile, reader_promise: value, novel_constitution: { ...profile.novel_constitution, reader_promise: value } })} hint="读者为什么愿意一直读下去？" />
-        <TextArea label="结局方向" value={profile.novel_constitution.ending_direction} onChange={(value) => setProfile({ ...profile, novel_constitution: { ...profile.novel_constitution, ending_direction: value } })} hint="不是完整结局，而是人物最终要完成的变化。" />
-        <TextArea label="风格指南" value={profile.style_guide} onChange={(value) => setProfile({ ...profile, style_guide: value })} hint="叙述距离、句子节奏、对白潜台词、情绪表达等。" />
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        <LinesEditor label="主题" values={profile.novel_constitution.themes} onChange={(values) => setProfile({ ...profile, novel_constitution: { ...profile.novel_constitution, themes: values } })} />
-        <LinesEditor label="反复意象" values={profile.novel_constitution.motifs} onChange={(values) => setProfile({ ...profile, novel_constitution: { ...profile.novel_constitution, motifs: values } })} />
-        <LinesEditor label="硬约束" values={profile.novel_constitution.hard_constraints} onChange={(values) => setProfile({ ...profile, novel_constitution: { ...profile.novel_constitution, hard_constraints: values }, hard_constraints: values })} />
-        <LinesEditor label="禁止处理方式" values={profile.novel_constitution.forbidden_treatments} onChange={(values) => setProfile({ ...profile, novel_constitution: { ...profile.novel_constitution, forbidden_treatments: values } })} />
-      </div>
-
-      <div className="border-t pt-6">
-        <h2 className="text-xl font-semibold">环境圣经</h2>
-        <p className="mt-1 text-sm text-muted-foreground">环境必须能够制造压力、限制行动，并随着人物关系变化产生新的意义。</p>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        <TextArea label="地理与空间" value={profile.environment_bible.geography} onChange={(value) => setProfile({ ...profile, environment_bible: { ...profile.environment_bible, geography: value } })} />
-        <TextArea label="时间与气候" value={profile.environment_bible.time_and_climate} onChange={(value) => setProfile({ ...profile, environment_bible: { ...profile.environment_bible, time_and_climate: value } })} />
-        <LinesEditor label="感官素材" values={profile.environment_bible.sensory_palette} onChange={(values) => setProfile({ ...profile, environment_bible: { ...profile.environment_bible, sensory_palette: values } })} />
-        <LinesEditor label="社会压力" values={profile.environment_bible.social_pressures} onChange={(values) => setProfile({ ...profile, environment_bible: { ...profile.environment_bible, social_pressures: values } })} />
-        <LinesEditor label="日常生活细节" values={profile.environment_bible.daily_life_details} onChange={(values) => setProfile({ ...profile, environment_bible: { ...profile.environment_bible, daily_life_details: values } })} />
-        <LinesEditor label="反复出现的地点" values={profile.environment_bible.recurring_locations} onChange={(values) => setProfile({ ...profile, environment_bible: { ...profile.environment_bible, recurring_locations: values } })} />
-        <LinesEditor label="环境限制" values={profile.environment_bible.environmental_constraints} onChange={(values) => setProfile({ ...profile, environment_bible: { ...profile.environment_bible, environmental_constraints: values } })} />
-        <LinesEditor label="环境意象" values={profile.environment_bible.recurring_motifs} onChange={(values) => setProfile({ ...profile, environment_bible: { ...profile.environment_bible, recurring_motifs: values } })} />
-      </div>
-
-      <div className="border-t pt-6">
-        <h2 className="text-xl font-semibold">人物与关系规则</h2>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        <LinesEditor label="人物动态要求" values={profile.character_dynamics} onChange={(values) => setProfile({ ...profile, character_dynamics: values })} hint="例如：人物当前欲望、误解、秘密、底线、改变代价。" />
-        <LinesEditor label="关系规则" values={profile.relationship_rules} onChange={(values) => setProfile({ ...profile, relationship_rules: values })} hint="例如：权力差、情感债务、信任变化的证据。" />
-        <LinesEditor label="章节要求" values={profile.chapter_requirements} onChange={(values) => setProfile({ ...profile, chapter_requirements: values })} />
-        <LinesEditor label="节奏控制" values={profile.rhythm_controls} onChange={(values) => setProfile({ ...profile, rhythm_controls: values })} />
-        <LinesEditor label="反 AI 规则" values={profile.anti_ai_rules} onChange={(values) => setProfile({ ...profile, anti_ai_rules: values })} />
-        <LinesEditor label="文学审核标准" values={profile.literary_review_rubric} onChange={(values) => setProfile({ ...profile, literary_review_rubric: values })} />
-      </div>
-      <Button onClick={() => void saveCreativeProfile()} disabled={creativeSaving}>
-        {creativeSaving ? "保存中…" : "保存书级创作内核"}
-      </Button>
-    </section>
-  );
+  const nav = <div className="flex items-center gap-2 border-b border-[#dfe6f0]"><button type="button" onClick={() => setTab("model")} className={cn("relative flex items-center gap-2 px-2 pb-3 pt-2 text-[15px] font-semibold", tab === "model" ? "text-[#2563eb] after:absolute after:inset-x-0 after:bottom-[-1px] after:h-0.5 after:bg-[#2563eb]" : "text-[#697895]")}>模型连接<span className="rounded-full bg-[#e8f0ff] px-2 py-0.5 text-[11px] text-[#2563eb]">当前作品</span></button><button type="button" onClick={() => setTab("creative")} className={cn("relative flex items-center gap-2 px-2 pb-3 pt-2 text-[15px] font-semibold", tab === "creative" ? "text-[#2563eb] after:absolute after:inset-x-0 after:bottom-[-1px] after:h-0.5 after:bg-[#2563eb]" : "text-[#697895]")}>书级创作内核<span className="rounded-full bg-[#e8f0ff] px-2 py-0.5 text-[11px] text-[#2563eb]">仅当前作品</span></button></div>;
+  const notices = <>{error ? <div className="flex items-start gap-2 rounded-[8px] border border-[#f0caca] bg-[#fff7f7] px-4 py-3 text-sm text-[#b54d4d]"><XCircle className="mt-0.5 size-4 shrink-0" />{error}</div> : null}{message ? <div className="flex items-start gap-2 rounded-[8px] border border-[#c6eadc] bg-[#f4fcf8] px-4 py-3 text-sm text-[#167957]"><Check className="mt-0.5 size-4 shrink-0" />{message}</div> : null}</>;
+  return <div className="mx-auto w-full max-w-[1360px] pb-12"><header className="flex min-h-[72px] items-center justify-between gap-4 border-b border-[#e4eaf3]"><div className="flex items-center gap-2 text-sm text-[#7d8aa1]"><span>工作室</span><span>/</span><strong className="text-[#172443]">AI 设置</strong></div><Button className="h-10 bg-[#2563eb] px-5 hover:bg-[#1d4ed8]" disabled={loading || saveState === "saving"} onClick={() => void saveAll()}><Save className="size-4" />{saveState === "saving" ? "保存中…" : "保存修改"}</Button></header><div className="space-y-5 pt-8"><div><h1 className="font-serif text-[34px] font-semibold leading-tight tracking-[-.04em] text-[#101c3b]">AI 设置</h1><p className="mt-2 text-[15px] text-[#718099]">管理模型连接与本书创作规则</p></div>{nav}{notices}
+    {tab === "model" ? <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.95fr)_minmax(285px,.95fr)]"><div className="min-w-0 space-y-5"><Panel><div className="border-b border-[#edf1f6] px-6 py-5"><div className="flex items-center gap-2"><h2 className="text-[18px] font-bold text-[#172443]">模型连接</h2><span className="rounded-full bg-[#edf3ff] px-2 py-0.5 text-[11px] text-[#2563eb]">当前作品</span></div><p className="mt-1 text-sm text-[#7d8aa1]">用于本书的生成、改写与审查请求。</p></div><div className="space-y-5 p-6"><div className="grid gap-5 sm:grid-cols-2"><SelectField label="提供商" value={provider} onChange={applyProvider}>{LLM_PROVIDER_PRESETS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</SelectField><SelectField label="模型" value={model} onChange={(value) => { setModel(value); invalidateTest(); }}>{preset.models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</SelectField></div><Field label="Base URL" value={baseUrl} onChange={(value) => { setBaseUrl(value); invalidateTest(); }} hint={`当前有效地址；留空将使用 ${preset.baseUrl}`} /><div><div className="mb-1.5 flex items-center justify-between gap-3"><span className="text-[13px] font-semibold text-[#25365a]">凭据来源</span><span className="text-right text-xs text-[#8491a7]">浏览器配置优先；未提供时使用服务端环境变量</span></div><div className="grid grid-cols-2 rounded-[8px] border border-[#d6dfec] bg-[#f7f9fc] p-0.5"><div className="flex h-10 items-center justify-center gap-2 text-sm text-[#6e7d97]"><ShieldCheck className="size-4" />服务端配置</div><div className="flex h-10 items-center justify-center gap-2 rounded-[6px] bg-[#e8f0ff] text-sm font-semibold text-[#2563eb]"><KeyRound className="size-4" />浏览器配置</div></div></div><div><Field label={`${preset.label} API Key`} value={keyDraft} onChange={(value) => { setKeyDraft(value); setClearKey(false); invalidateTest(); }} type="password" hint={hasStoredKey && !clearKey ? "已配置。输入新值可替换；留空表示保留现有值。" : "仅保存于当前浏览器，不会写入数据库或下发服务端密钥。"} /><div className="mt-2 flex items-center justify-between text-xs"><span className="flex items-center gap-1.5 text-[#718099]"><Dot tone={clearKey || !hasStoredKey ? "danger" : "success"} />{clearKey ? "将清除已保存凭据" : hasStoredKey ? "已配置" : "未配置"}</span>{hasStoredKey && !clearKey ? <button type="button" onClick={clearStoredKey} className="inline-flex items-center gap-1 text-[#c15d5d]"><Trash2 className="size-3.5" />清除凭据</button> : null}</div></div><div className="overflow-hidden rounded-[8px] border border-[#dfe6f0]"><button type="button" onClick={() => setAdvanced((v) => !v)} className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-semibold text-[#31466e]"><span className="flex items-center gap-2"><ChevronDown className={cn("size-4 transition-transform", advanced && "rotate-180")} />高级设置</span><span className="text-xs font-normal text-[#8a96aa]">服务端环境变量名称</span></button>{advanced ? <div className="border-t border-[#edf1f6] bg-[#fbfcfe] p-4"><Field label="服务端 API Key 环境变量名" value={envName} onChange={setEnvName} hint="只保存名称，不读取或展示环境变量的值。" /></div> : null}</div><div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#edf1f6] pt-1"><div className="flex items-center gap-3"><Button variant="outline" className="h-10 border-[#8db1ff] px-5 text-[#2563eb]" disabled={testState === "testing" || loading} onClick={() => void testConnection()}>{testState === "testing" ? <LoaderCircle className="size-4 animate-spin" /> : <TestTube2 className="size-4" />}{testState === "testing" ? "测试中…" : "测试连接"}</Button><span className={cn("flex items-center gap-2 text-sm", testState === "success" ? "text-[#17825d]" : testState === "error" ? "text-[#b64f4f]" : "text-[#7d8aa1]")}><Dot tone={statusTone} />{statusText}</span></div><Button className="h-10 bg-[#2563eb] px-5 hover:bg-[#1d4ed8]" disabled={loading || saveState === "saving"} onClick={() => void saveAll()}><Save className="size-4" />保存修改</Button></div></div></Panel><Panel className="p-5"><div className="flex items-center justify-between gap-3"><div><h2 className="text-[17px] font-bold text-[#172443]">书级创作内核</h2><p className="mt-1 text-sm text-[#7d8aa1]">{project?.title || "当前作品"} · 已完成 {completion}/4 项核心字段</p></div><button type="button" onClick={() => setTab("creative")} className="text-sm font-semibold text-[#2563eb]">编辑创作内核 →</button></div></Panel></div><aside className="space-y-5 lg:sticky lg:top-5"><Panel className="p-6"><h2 className="text-[18px] font-bold text-[#172443]">当前配置</h2><div className="my-4 h-px bg-[#edf1f6]"/><dl className="space-y-4 text-sm"><div className="grid grid-cols-[76px_1fr] gap-3"><dt className="text-[#8491a7]">提供商</dt><dd className="font-semibold text-[#25365a]">{preset.label}</dd></div><div className="grid grid-cols-[76px_1fr] gap-3"><dt className="text-[#8491a7]">模型</dt><dd className="break-all font-semibold text-[#25365a]">{model}</dd></div><div className="grid grid-cols-[76px_1fr] gap-3"><dt className="text-[#8491a7]">凭据来源</dt><dd className="font-semibold text-[#25365a]">{keySource}</dd></div><div className="grid grid-cols-[76px_1fr] gap-3"><dt className="text-[#8491a7]">作用范围</dt><dd className="font-semibold text-[#25365a]">当前作品</dd></div><div className="grid grid-cols-[76px_1fr] gap-3"><dt className="text-[#8491a7]">连接状态</dt><dd className="flex items-center gap-2 font-semibold text-[#697895]"><Dot tone={statusTone} />{statusText}</dd></div></dl>{dirty ? <p className="mt-5 rounded-[7px] bg-[#fff8ec] px-3 py-2 text-xs leading-5 text-[#a8752b]">待保存配置：当前表单有修改，尚未成为生效配置。</p> : null}</Panel><Panel className="p-6"><h2 className="text-[18px] font-bold text-[#172443]">配置说明</h2><div className="my-4 h-px bg-[#edf1f6]"/><div className="space-y-4 text-sm leading-6 text-[#718099]"><p><b className="text-[#31466e]">模型连接</b>：当前作品的生成、改写与审查请求会使用这里的配置。</p><p><b className="text-[#31466e]">凭据优先级</b>：本次输入优先，其次是浏览器按提供商保存的 Key，最后才使用服务端环境变量。</p><p><b className="text-[#31466e]">书级内核</b>：只属于《{project?.title || "当前作品"}》，切换作品不会串用。</p></div></Panel></aside></div> : <CreativeTab profile={profile} project={project} loading={loading} saving={saveState === "saving"} completion={completion} updateProfile={updateProfile} updateC={updateC} updateE={updateE} saveAll={saveAll} />}
+    </div></div>;
 }
+
+function CreativeTab({ profile, project, loading, saving, completion, updateProfile, updateC, updateE, saveAll }: { profile: CreativeProfile; project: Project | null; loading: boolean; saving: boolean; completion: number; updateProfile: (profile: CreativeProfile) => void; updateC: (key: keyof CreativeProfile["novel_constitution"], value: string | string[]) => void; updateE: (key: keyof CreativeProfile["environment_bible"], value: string | string[]) => void; saveAll: () => Promise<void> }) {
+  return <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.95fr)_minmax(285px,.95fr)]"><div className="min-w-0"><Panel><div className="border-b border-[#edf1f6] px-6 py-5"><div className="flex items-center gap-2"><h2 className="text-[18px] font-bold text-[#172443]">书级创作内核</h2><span className="rounded-full bg-[#e8f0ff] px-2 py-0.5 text-[11px] text-[#2563eb]">仅当前作品</span></div><p className="mt-1 text-sm text-[#7d8aa1]">《{project?.title || "当前作品"}》的主题、承诺与叙事规则，会注入后续创作流程。</p></div><div className="space-y-7 p-6"><Group title="主题与承诺"><div className="grid gap-5 md:grid-cols-2"><Field label="核心问题" value={profile.novel_constitution.core_question} onChange={(v) => updateC("core_question", v)} hint="这本书最终要追问什么人生问题？" /><Field label="读者承诺" value={profile.reader_promise} onChange={(v) => updateProfile({ ...profile, reader_promise: v, novel_constitution: { ...profile.novel_constitution, reader_promise: v } })} hint="读者为什么愿意一直读下去？" /><Field label="结局方向" value={profile.novel_constitution.ending_direction} onChange={(v) => updateC("ending_direction", v)} /><LinesField label="主题" values={profile.novel_constitution.themes} onChange={(v) => updateC("themes", v)} /><LinesField label="反复意象" values={profile.novel_constitution.motifs} onChange={(v) => updateC("motifs", v)} /></div></Group><Group title="故事走向与约束"><div className="grid gap-5 md:grid-cols-2"><LinesField label="硬约束" values={profile.novel_constitution.hard_constraints} onChange={(v) => { updateC("hard_constraints", v); updateProfile({ ...profile, hard_constraints: v, novel_constitution: { ...profile.novel_constitution, hard_constraints: v } }); }} /><LinesField label="禁止处理方式" values={profile.novel_constitution.forbidden_treatments} onChange={(v) => updateC("forbidden_treatments", v)} /><LinesField label="章节要求" values={profile.chapter_requirements} onChange={(v) => updateProfile({ ...profile, chapter_requirements: v })} /><LinesField label="节奏控制" values={profile.rhythm_controls} onChange={(v) => updateProfile({ ...profile, rhythm_controls: v })} /></div></Group><Group title="环境与关系"><div className="grid gap-5 md:grid-cols-2"><Field label="地理与空间" value={profile.environment_bible.geography} onChange={(v) => updateE("geography", v)} /><Field label="时间与气候" value={profile.environment_bible.time_and_climate} onChange={(v) => updateE("time_and_climate", v)} /><LinesField label="感官素材" values={profile.environment_bible.sensory_palette} onChange={(v) => updateE("sensory_palette", v)} /><LinesField label="社会压力" values={profile.environment_bible.social_pressures} onChange={(v) => updateE("social_pressures", v)} /><LinesField label="日常生活细节" values={profile.environment_bible.daily_life_details} onChange={(v) => updateE("daily_life_details", v)} /><LinesField label="反复出现的地点" values={profile.environment_bible.recurring_locations} onChange={(v) => updateE("recurring_locations", v)} /><LinesField label="环境限制" values={profile.environment_bible.environmental_constraints} onChange={(v) => updateE("environmental_constraints", v)} /><LinesField label="环境意象" values={profile.environment_bible.recurring_motifs} onChange={(v) => updateE("recurring_motifs", v)} /><LinesField label="人物动态要求" values={profile.character_dynamics} onChange={(v) => updateProfile({ ...profile, character_dynamics: v })} /><LinesField label="关系规则" values={profile.relationship_rules} onChange={(v) => updateProfile({ ...profile, relationship_rules: v })} /></div></Group><Group title="叙事风格与审查"><div className="grid gap-5 md:grid-cols-2"><Field label="风格指南" value={profile.style_guide} onChange={(v) => updateProfile({ ...profile, style_guide: v })} hint="叙述距离、句子节奏、对白潜台词、情绪表达等。" /><LinesField label="文学审核标准" values={profile.literary_review_rubric} onChange={(v) => updateProfile({ ...profile, literary_review_rubric: v })} /><LinesField label="反 AI 规则" values={profile.anti_ai_rules} onChange={(v) => updateProfile({ ...profile, anti_ai_rules: v })} /></div></Group></div><div className="flex items-center justify-between border-t border-[#edf1f6] bg-[#fbfcfe] px-6 py-4"><span className="text-xs text-[#8491a7]">已完成 {completion}/4 项核心字段</span><Button className="h-10 bg-[#2563eb] px-5 hover:bg-[#1d4ed8]" disabled={loading || saving} onClick={() => void saveAll()}><Save className="size-4" />{saving ? "保存中…" : "保存修改"}</Button></div></Panel></div><aside className="space-y-5 lg:sticky lg:top-5"><Panel className="p-6"><h2 className="text-[18px] font-bold text-[#172443]">当前作品</h2><div className="my-4 h-px bg-[#edf1f6]"/><p className="font-semibold text-[#25365a]">{project?.title || "加载中…"}</p><p className="mt-2 flex items-center gap-2 text-sm text-[#718099]"><ShieldCheck className="size-4 text-[#2563eb]" />仅当前作品生效</p><div className="mt-5 rounded-[8px] bg-[#f5f8fd] p-3 text-xs leading-5 text-[#718099]">这些规则会注入大纲、章节计划、正文和文学审核，切换作品不会串用。</div></Panel><Panel className="p-6"><h2 className="text-[18px] font-bold text-[#172443]">完成情况</h2><div className="my-4 h-px bg-[#edf1f6]"/><div className="space-y-3 text-sm">{[["核心问题", Boolean(profile.novel_constitution.core_question)], ["读者承诺", Boolean(profile.reader_promise)], ["结局方向", Boolean(profile.novel_constitution.ending_direction)], ["风格指南", Boolean(profile.style_guide)]].map(([label, done]) => <div className="flex items-center justify-between" key={String(label)}><span className="text-[#718099]">{label}</span><span className={cn("flex items-center gap-1.5 font-semibold", done ? "text-[#16855f]" : "text-[#d58b31]")}>{done ? <Check className="size-3.5" /> : <span className="size-1.5 rounded-full bg-current" />}{done ? "已设置" : "待完善"}</span></div>)}</div></Panel></aside></div>;
+}
+function Group({ title, children }: { title: string; children: React.ReactNode }) { return <div className="border-t border-[#edf1f6] pt-6 first:border-t-0 first:pt-0"><h3 className="mb-4 text-[15px] font-bold text-[#31466e]">{title}</h3>{children}</div>; }

@@ -2,97 +2,44 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
-
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Field, StatusBanner } from "@/components/ui-bits";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, BookOpen, ChevronRight, CircleHelp, Lightbulb, Plus, Search, Sparkles, UserRound, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { StatusBanner } from "@/components/ui-bits";
 import { api, ApiError } from "@/lib/api";
 import { DEFAULT_CHARACTER } from "@/lib/defaults";
 import { tryAdvancePipeline } from "@/lib/hitl";
 import { approvalStatusLabel, characterRoleLabel } from "@/lib/labels";
-import type { Character } from "@/lib/types";
+import type { Chapter, Character } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+type Filter = "all" | "protagonist" | "supporting";
+type CharacterForm = typeof DEFAULT_CHARACTER & { aliases: string[]; status: string; species: string; rank: string };
+const inputClass = "h-10 w-full rounded-[8px] border border-[#dbe3ef] bg-white px-3 text-sm text-[#1d2b49] outline-none transition placeholder:text-[#a4afbf] focus:border-[#7da3f5] focus:ring-3 focus:ring-[#2563eb]/10";
+const textAreaClass = "min-h-24 w-full resize-y rounded-[8px] border border-[#dbe3ef] bg-white px-3 py-2.5 text-sm leading-6 text-[#1d2b49] outline-none transition placeholder:text-[#a4afbf] focus:border-[#7da3f5] focus:ring-3 focus:ring-[#2563eb]/10";
+const roleOptions: Array<[string, string]> = [["protagonist", "主角"], ["love_interest", "恋爱对象"], ["antagonist", "反派"], ["supporting", "配角"], ["extra", "龙套"]];
+
+function Panel({ children, className }: { children: React.ReactNode; className?: string }) { return <section className={cn("rounded-[12px] border border-[#e5ebf4] bg-white shadow-[0_8px_24px_rgba(35,55,95,.045)]", className)}>{children}</section>; }
+function Field({ label, value, onChange, multiline = false, placeholder }: { label: string; value: string; onChange: (value: string) => void; multiline?: boolean; placeholder?: string }) { return <label className="block"><span className="mb-1.5 block text-[13px] font-medium text-[#40506b]">{label}</span>{multiline ? <textarea className={textAreaClass} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} /> : <input className={inputClass} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />}</label>; }
+function Tags({ values, onChange }: { values: string[]; onChange: (values: string[]) => void }) { const [draft, setDraft] = useState(""); function add() { const value = draft.trim(); if (!value) return; onChange(Array.from(new Set([...values, value]))); setDraft(""); } return <div><span className="mb-1.5 block text-[13px] font-medium text-[#40506b]">性格标签</span><div className="flex min-h-10 flex-wrap items-center gap-2 rounded-[8px] border border-[#dbe3ef] px-2.5 py-1.5">{values.map((value) => <span key={value} className="inline-flex items-center gap-1 rounded-full bg-[#edf3ff] px-2.5 py-1 text-xs text-[#3266c7]">{value}<button type="button" onClick={() => onChange(values.filter((item) => item !== value))} aria-label={`删除性格标签 ${value}`}><X className="size-3" /></button></span>)}<input className="min-w-24 flex-1 border-0 px-1 py-1 text-sm outline-none" value={draft} placeholder="添加标签" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); add(); } }} /></div><button type="button" className="mt-2 text-xs font-medium text-[#2563eb]" onClick={add}><Plus className="mr-1 inline size-3.5" />添加性格</button></div>; }
+function emptyForm(): CharacterForm { return { ...DEFAULT_CHARACTER, aliases: [], tropes: [], status: "draft", species: DEFAULT_CHARACTER.species, rank: DEFAULT_CHARACTER.rank }; }
+function formFromCharacter(item: Character): CharacterForm { return { ...DEFAULT_CHARACTER, ...item, aliases: item.aliases || [], tropes: item.tropes || [], species: item.species || "", rank: item.rank || "", status: item.status }; }
+function statusText(status: string) { return status === "approved" ? approvalStatusLabel(status) : status === "pending_review" ? "待审阅" : "待完善"; }
 
 export default function CharactersPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const [items, setItems] = useState<Character[]>([]);
-  const [form, setForm] = useState({ ...DEFAULT_CHARACTER, name: "Aria" });
-  const [aliasesText, setAliasesText] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [ok, setOk] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [items, setItems] = useState<Character[]>([]); const [chapters, setChapters] = useState<Chapter[]>([]); const [selectedId, setSelectedId] = useState<string | null>(null); const [form, setForm] = useState<CharacterForm>(emptyForm()); const [savedSnapshot, setSavedSnapshot] = useState(""); const [query, setQuery] = useState(""); const [filter, setFilter] = useState<Filter>("all"); const [creating, setCreating] = useState(false); const [mobileListOpen, setMobileListOpen] = useState(false); const [aiOpen, setAiOpen] = useState(false); const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [ok, setOk] = useState<string | null>(null);
+  const snapshot = useMemo(() => JSON.stringify(form), [form]); const dirty = Boolean(savedSnapshot) && snapshot !== savedSnapshot;
+  const filtered = useMemo(() => items.filter((item) => (filter === "all" || item.role === (filter === "protagonist" ? "protagonist" : "supporting")) && (!query.trim() || [item.name, ...(item.aliases || []), item.role, item.goal].join(" ").toLowerCase().includes(query.trim().toLowerCase()))), [items, filter, query]); const selected = items.find((item) => item.id === selectedId) || null; const relatedChapters = selected ? chapters.filter((chapter) => `${chapter.title} ${chapter.content}`.toLowerCase().includes(selected.name.toLowerCase())) : []; const firstChapter = relatedChapters.slice().sort((a, b) => a.chapter_number - b.chapter_number)[0] || null;
 
-  async function load() {
-    setItems(await api<Character[]>(`/projects/${projectId}/characters`));
-  }
+  useEffect(() => { let active = true; Promise.all([api<Character[]>(`/projects/${projectId}/characters`), api<Chapter[]>(`/projects/${projectId}/chapters`).catch(() => [])]).then(([loaded, loadedChapters]) => { if (!active) return; setItems(loaded); setChapters(loadedChapters); if (loaded[0]) { setSelectedId(loaded[0].id); const next = formFromCharacter(loaded[0]); setForm(next); setSavedSnapshot(JSON.stringify(next)); } }).catch((err: unknown) => { if (active) setError(err instanceof ApiError ? err.message : "角色列表加载失败"); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, [projectId]);
+  useEffect(() => { function warn(event: BeforeUnloadEvent) { if (!dirty) return; event.preventDefault(); event.returnValue = ""; } window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn); }, [dirty]);
+  function update<K extends keyof CharacterForm>(key: K, value: CharacterForm[K]) { setForm((current) => ({ ...current, [key]: value })); setOk(null); }
+  function switchCharacter(item: Character) { if (dirty && !window.confirm("当前角色有未保存修改，确定切换吗？")) return; const next = formFromCharacter(item); setCreating(false); setSelectedId(item.id); setForm(next); setSavedSnapshot(JSON.stringify(next)); setMobileListOpen(false); setError(null); }
+  function beginCreate() { if (dirty && !window.confirm("当前角色有未保存修改，确定新建角色吗？")) return; const next = emptyForm(); setCreating(true); setSelectedId(null); setForm(next); setSavedSnapshot(JSON.stringify(next)); setMobileListOpen(false); setError(null); setOk(null); }
+  async function save(approve = false) { if (!form.name.trim()) { setError("请填写角色姓名。"); return; } setBusy(true); setError(null); setOk(null); try { let saved: Character; const body = { ...form, name: form.name.trim(), aliases: form.aliases.filter(Boolean), tropes: Array.from(new Set(form.tropes.filter(Boolean))) }; if (creating) { saved = await api<Character>(`/projects/${projectId}/characters`, { method: "POST", projectId, body: JSON.stringify(body) }); } else if (selectedId) { saved = await api<Character>(`/projects/${projectId}/characters/${selectedId}`, { method: "PATCH", projectId, body: JSON.stringify(body) }); } else { throw new ApiError(400, "missing_character", "请先选择角色或新建角色"); } if (approve) { await api(`/projects/${projectId}/characters/${saved.id}/submit`, { method: "POST", projectId }); saved = await api<Character>(`/projects/${projectId}/characters/${saved.id}/approve`, { method: "POST", projectId, body: JSON.stringify({ confirmed_by: "studio-user" }) }); await tryAdvancePipeline(projectId); } setItems((current) => creating ? [...current, saved] : current.map((item) => item.id === saved.id ? saved : item)); setSelectedId(saved.id); setCreating(false); setForm(formFromCharacter(saved)); setSavedSnapshot(JSON.stringify(formFromCharacter(saved))); setOk(approve ? "角色已保存并批准。" : "角色修改已保存，尚未批准。 "); } catch (err) { setError(err instanceof ApiError ? err.message : "角色保存失败"); } finally { setBusy(false); } }
+  const roleLabel = characterRoleLabel(form.role); const selectedName = creating ? "新建角色" : form.name || "未命名角色";
+  // @ts-expect-error The inline planning tab tuple is a static icon map.
 
-  useEffect(() => {
-    load()
-      .catch((err: ApiError) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [projectId]);
-
-  async function createAndConfirm() {
-    setBusy(true);
-    setError(null);
-    try {
-      const created = await api<Character>(`/projects/${projectId}/characters`, {
-        method: "POST",
-        projectId,
-        body: JSON.stringify({
-          ...form,
-          aliases: aliasesText.split(/[，,]/).map((name) => name.trim()).filter(Boolean),
-          tropes: form.tropes,
-        }),
-      });
-      await tryAdvancePipeline(projectId);
-      setOk(`角色 ${created.name} 已添加并自动确定。`);
-      await load();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "添加并确认失败");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section className="grid gap-6 lg:grid-cols-2">
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <h1 className="text-2xl font-semibold">角色</h1>
-            <p className="text-sm text-muted-foreground">资料库 · 添加时默认一并确认</p>
-          </div>
-          <Link href={`/projects/${projectId}`} className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "inline-flex")}>
-            回概览
-          </Link>
-        </div>
-        <StatusBanner loading={loading} error={error} ok={ok} />
-        {items.map((item) => (
-          <article key={item.id} className="rounded-lg border p-3 text-sm">
-            <div className="font-medium">
-              {item.name} · {characterRoleLabel(item.role)} · {item.status === "approved" ? approvalStatusLabel(item.status) : "自动确定"}
-            </div>
-            <p className="text-muted-foreground">{item.goal}</p>
-            {item.aliases?.length ? (
-              <p className="mt-1 text-xs text-muted-foreground">别名：{item.aliases.join("、")}</p>
-            ) : null}
-          </article>
-        ))}
-      </div>
-      <div className="space-y-2">
-        <Field label="姓名" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
-        <Field label="别名（逗号分隔，可选）" value={aliasesText} onChange={setAliasesText} />
-        <Field label="角色定位" value={form.role} onChange={(v) => setForm({ ...form, role: v })} />
-        <Field label="性格" value={form.personality} onChange={(v) => setForm({ ...form, personality: v })} />
-        <Field label="背景" value={form.background} onChange={(v) => setForm({ ...form, background: v })} multiline />
-        <Field label="目标" value={form.goal} onChange={(v) => setForm({ ...form, goal: v })} />
-        <Field label="秘密" value={form.secret} onChange={(v) => setForm({ ...form, secret: v })} />
-        <Button disabled={busy} onClick={() => void createAndConfirm()}>
-          {busy ? "处理中…" : "添加并确认"}
-        </Button>
-      </div>
-    </section>
-  );
+  return <div className="mx-auto w-full max-w-[1400px] pb-8"><header className="flex min-h-[72px] items-center justify-between gap-4 border-b border-[#e4eaf3]"><div className="flex min-w-0 items-center gap-2 text-sm text-[#7d8aa1]"><Link href="/projects" className="hover:text-[#2563eb]">作品库</Link><span>/</span><Link href={`/projects/${projectId}`} className="truncate hover:text-[#2563eb]">策划</Link><span>/</span><strong className="text-[#172443]">角色</strong></div><div className="flex items-center gap-2"><span className={cn("hidden text-xs sm:inline", busy ? "text-[#c27a00]" : dirty ? "text-[#c27a00]" : "text-[#16855f]")}>{busy ? "保存中…" : dirty ? "未保存" : "已保存"}</span><Button variant="outline" className="h-10 border-[#b9cdf8] text-[#2563eb]" onClick={() => setAiOpen((value) => !value)}><Sparkles className="size-4" />AI 辅助策划</Button><Button className="h-10 bg-[#2563eb] hover:bg-[#1d4ed8]" onClick={beginCreate}><Plus className="size-4" />新建角色</Button></div></header><div className="space-y-5 pt-8"><div><h1 className="font-serif text-[34px] font-semibold leading-tight tracking-[-.04em] text-[#101c3b]">小说策划</h1><p className="mt-2 text-[15px] text-[#718099]">让人物、世界与主线保持一致</p></div><StatusBanner loading={loading} error={error} ok={ok} />{aiOpen ? <Panel className="border-[#cbdcff] bg-[#f7faff] p-4"><div className="flex items-start gap-3"><Lightbulb className="mt-0.5 size-5 text-[#2563eb]" /><div><p className="text-sm font-semibold text-[#20345c]">AI 辅助策划</p><p className="mt-1 text-xs leading-5 text-[#718099]">当前角色 API 暂未提供角色建议生成接口。这里保留入口，后续接入时会先展示候选内容，不会直接覆盖角色设定。</p></div></div></Panel> : null}<nav className="flex overflow-x-auto border-b border-[#dfe7f2]">{[["/characters", "角色", UserRound], ["/world", "世界观", BookOpen], ["/plot", "故事主线", Sparkles], ["/arcs", "分卷大纲", BookOpen]].map(([path, label, Icon]) => <Link key={String(path)} href={`/projects/${projectId}${path}`} className={cn("flex shrink-0 items-center gap-2 border-b-2 border-transparent px-5 py-3 text-sm font-medium text-[#718099]", path === "/characters" ? "border-[#2563eb] bg-[#edf3ff] text-[#2563eb]" : "hover:text-[#2563eb]")}><Icon className="size-4" />{label}</Link>)}</nav><div className="grid items-start gap-4 lg:grid-cols-[240px_minmax(0,1fr)_240px]"><Panel className={cn("overflow-hidden", mobileListOpen ? "fixed inset-4 z-50 block overflow-y-auto shadow-2xl lg:static lg:z-auto lg:shadow-none" : "hidden lg:block")}><div className="flex items-center justify-between border-b border-[#eef2f7] px-4 py-4"><h2 className="text-[17px] font-semibold text-[#172443]">角色列表</h2><button type="button" className="lg:hidden" onClick={() => setMobileListOpen(false)}><X className="size-5 text-[#718099]" /></button></div><div className="p-3"><label className="relative block"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#9aa6b8]" /><input className={cn(inputClass, "pl-9")} value={query} placeholder="搜索角色…" onChange={(event) => setQuery(event.target.value)} /></label><div className="mt-3 grid grid-cols-3 gap-1 rounded-[8px] bg-[#f2f5fa] p-1">{[["all", `全部 (${items.length})`], ["protagonist", `主角 (${items.filter((item) => item.role === "protagonist").length})`], ["supporting", `配角 (${items.filter((item) => item.role === "supporting").length})`]].map(([value, label]) => <button key={value} type="button" className={cn("rounded-md px-1 py-2 text-xs", filter === value ? "bg-[#2563eb] font-medium text-white" : "text-[#718099]")} onClick={() => setFilter(value as Filter)}>{label}</button>)}</div></div><div className="divide-y divide-[#eef2f7]">{filtered.map((item) => <button key={item.id} type="button" onClick={() => switchCharacter(item)} className={cn("flex w-full items-center gap-3 px-4 py-3 text-left transition", selectedId === item.id && !creating ? "bg-[#edf3ff] shadow-[inset_3px_0_0_#2563eb]" : "hover:bg-[#f8faff]")}><span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[#e9eef7] text-sm font-semibold text-[#52647f]">{item.name.slice(0, 1)}</span><span className="min-w-0 flex-1"><strong className="block truncate text-sm text-[#1d2b49]">{item.name || "未命名角色"}</strong><span className="mt-1 flex flex-wrap gap-1"><em className="rounded-full bg-[#f2f5fa] px-2 py-0.5 text-[11px] not-italic text-[#718099]">{characterRoleLabel(item.role)}</em><em className={cn("rounded-full px-2 py-0.5 text-[11px] not-italic", item.status === "approved" ? "bg-[#eaf9f2] text-[#16855f]" : "bg-[#fff4df] text-[#b36a00]")}>{statusText(item.status)}</em></span></span><ChevronRight className="size-4 shrink-0 text-[#9aa6b8]" /></button>)}{!loading && !filtered.length ? <div className="p-5 text-center text-xs leading-5 text-[#8995a9]">没有匹配角色。<br />可以新建一个角色。</div> : null}</div></Panel><div className="lg:hidden"><Button variant="outline" className="w-full" onClick={() => setMobileListOpen(true)}><UserRound className="size-4" />选择角色：{selectedName}</Button></div><Panel className="min-w-0 overflow-hidden"><div className="border-b border-[#eef2f7] px-5 py-5 sm:px-7"><div className="flex items-start gap-4"><span className="flex size-14 shrink-0 items-center justify-center rounded-full bg-[#e9eef7] text-xl font-semibold text-[#52647f]">{creating ? <Plus className="size-6" /> : form.name.slice(0, 1) || <UserRound className="size-6" />}</span><div className="min-w-0"><h2 className="text-[22px] font-semibold tracking-[-.03em] text-[#172443]">{selectedName}</h2><div className="mt-2 flex flex-wrap items-center gap-2"><span className="rounded-full bg-[#edf3ff] px-2.5 py-1 text-xs font-medium text-[#2563eb]">{roleLabel || "待设置定位"}</span>{!creating ? <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium", form.status === "approved" ? "bg-[#eaf9f2] text-[#16855f]" : "bg-[#fff4df] text-[#b36a00]")}>{statusText(form.status)}</span> : <span className="rounded-full bg-[#f2f5fa] px-2.5 py-1 text-xs text-[#718099]">草稿</span>}</div></div></div></div><div className="space-y-7 p-5 sm:p-7"><section><h3 className="mb-4 text-[17px] font-semibold text-[#172443]">基本信息</h3><div className="grid gap-5 md:grid-cols-2"><Field label="姓名" value={form.name} onChange={(value) => update("name", value)} placeholder="输入角色姓名" /><Field label="别名" value={form.aliases.join("、")} onChange={(value) => update("aliases", value.split(/[、，,]/).map((item) => item.trim()).filter(Boolean))} placeholder="多个别名用逗号分隔" /><label className="block"><span className="mb-1.5 block text-[13px] font-medium text-[#40506b]">角色定位</span><select className={inputClass} value={form.role} onChange={(event) => update("role", event.target.value)}>{roleOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><Tags values={form.tropes} onChange={(values) => update("tropes", values)} /></div></section><section className="border-t border-[#eef2f7] pt-7"><h3 className="mb-4 text-[17px] font-semibold text-[#172443]">背景与动机</h3><div className="space-y-4"><Field label="性格概述" value={form.personality} onChange={(value) => update("personality", value)} multiline /><Field label="背景" value={form.background} onChange={(value) => update("background", value)} multiline /><div className="grid gap-5 md:grid-cols-2"><Field label="目标" value={form.goal} onChange={(value) => update("goal", value)} multiline /><Field label="动机" value={form.motivation} onChange={(value) => update("motivation", value)} multiline /><Field label="恐惧" value={form.fear} onChange={(value) => update("fear", value)} multiline /><Field label="秘密" value={form.secret} onChange={(value) => update("secret", value)} multiline /></div></div></section><section className="border-t border-[#eef2f7] pt-7"><h3 className="mb-4 text-[17px] font-semibold text-[#172443]">关系与行为</h3><div className="grid gap-5 md:grid-cols-2"><Field label="优势" value={form.strength} onChange={(value) => update("strength", value)} multiline /><Field label="弱点" value={form.weakness} onChange={(value) => update("weakness", value)} multiline /><Field label="内部冲突" value={form.internal_conflict} onChange={(value) => update("internal_conflict", value)} multiline /><Field label="外部冲突" value={form.external_conflict} onChange={(value) => update("external_conflict", value)} multiline /><Field label="说话方式" value={form.speech_style} onChange={(value) => update("speech_style", value)} /><Field label="角色弧" value={form.character_arc} onChange={(value) => update("character_arc", value)} multiline /></div></section></div><div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#eef2f7] bg-[#fbfcfe] px-5 py-3.5 sm:px-7"><span className="text-xs text-[#8995a9]">{creating ? "新建角色不会影响现有角色" : dirty ? "有未保存修改" : "已加载当前角色"}</span><div className="flex gap-2"><Button variant="outline" disabled={busy || !dirty} onClick={() => { if (selected) switchCharacter(selected); else beginCreate(); }}>取消修改</Button><Button variant="outline" disabled={busy || !dirty} onClick={() => void save(false)}>保存修改</Button><Button disabled={busy || !dirty} onClick={() => void save(true)}>{busy ? "处理中…" : "保存并批准"}</Button></div></div></Panel><aside className="space-y-4 lg:block"><Panel className="p-5"><h2 className="flex items-center gap-2 text-[17px] font-semibold text-[#172443]"><Sparkles className="size-5 text-[#2563eb]" />角色关联</h2><div className="mt-4 divide-y divide-[#eef2f7]">{firstChapter ? <Link href={`/projects/${projectId}/chapters/${firstChapter.chapter_number}`} className="flex items-center justify-between py-3 text-sm text-[#53627a]">首次出场 <strong className="text-[#2563eb]">第 {firstChapter.chapter_number} 章</strong></Link> : <div className="py-3 text-sm text-[#8995a9]">暂无首次出场记录</div>}{relatedChapters.length ? <div className="py-3"><p className="mb-2 text-sm text-[#53627a]">相关章节</p><div className="space-y-1">{relatedChapters.slice(0, 5).map((chapter) => <Link key={chapter.id} href={`/projects/${projectId}/chapters/${chapter.chapter_number}`} className="flex items-center justify-between rounded-md px-2 py-1.5 text-xs text-[#2563eb] hover:bg-[#f1f5fc]"><span className="truncate">第 {chapter.chapter_number} 章 · {chapter.title || "未命名章节"}</span><ArrowRight className="size-3.5 shrink-0" /></Link>)}</div></div> : <div className="py-3 text-sm text-[#8995a9]">暂无章节关联数据</div>}</div></Panel><Panel className="p-5"><h2 className="flex items-center gap-2 text-[17px] font-semibold text-[#172443]"><CircleHelp className="size-5 text-[#2563eb]" />人物关系</h2><p className="mt-3 text-sm leading-6 text-[#8995a9]">当前接口未提供角色关系读取入口，暂不展示推测关系。</p></Panel><Panel className="p-5"><h2 className="flex items-center gap-2 text-[17px] font-semibold text-[#172443]"><Lightbulb className="size-5 text-[#2563eb]" />创作提示</h2><p className="mt-3 text-sm leading-6 text-[#5f6e87]">完善目标、动机与角色弧，能帮助主线和章节计划保持一致。</p></Panel></aside></div></div></div>;
 }
