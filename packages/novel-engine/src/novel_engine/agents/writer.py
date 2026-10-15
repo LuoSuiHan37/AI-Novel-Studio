@@ -1,7 +1,10 @@
-from novel_engine.agents.base import AgentResult, BaseAgent
+from collections.abc import AsyncIterator
+
+from novel_engine.agents.base import AgentResult, BaseAgent, _variable_map
 from novel_engine.agents.contracts import WriterContext, WriterInput, WriterOutput
 from novel_engine.domain.errors import InvalidStateError
 from novel_engine.memory.knowledge import check_prose_for_pov
+from novel_engine.providers.types import ChatMessage
 
 
 class WriterAgent(BaseAgent[WriterInput, WriterOutput]):
@@ -51,6 +54,36 @@ class WriterAgent(BaseAgent[WriterInput, WriterOutput]):
         forbidden = context.forbidden_knowledge.get(context.chapter_plan.pov, [])
         check_prose_for_pov(result.output.prose, context.chapter_plan.pov, forbidden)
         return result
+
+    async def stream_prose(self, payload: WriterInput) -> AsyncIterator[str]:
+        """Stream prose tokens without waiting for the structured writer result.
+
+        The normal writer contract returns JSON so the complete pipeline can
+        validate title, word count, and character names. The editor needs the
+        prose earlier than that contract can be parsed, so this transport-only
+        method asks the same model for prose text and leaves final validation
+        to the post-stream candidate pipeline.
+        """
+        context = payload.context
+        if not context.characters:
+            raise InvalidStateError("请先在「角色」页创建至少一个角色后再生成章节")
+        if not context.world_rules:
+            raise InvalidStateError("请先在「世界观」页完善世界规则后再生成章节")
+        if not context.chapter_plan.scenes:
+            raise InvalidStateError("请先为本章添加至少一个场景计划后再生成")
+        spec = self.load_prompt()
+        system, user = spec.render(_variable_map(payload, spec))
+        user += (
+            "\n\nStreaming transport instruction: output only the chapter prose. "
+            "Do not output JSON, a title, markdown fences, analysis, or metadata. "
+            "Start directly with the first paragraph and stop after the planned ending."
+        )
+        async for chunk in self._provider.stream([
+            ChatMessage(role="system", content=system),
+            ChatMessage(role="user", content=user),
+        ]):
+            if chunk.text:
+                yield chunk.text
 
 
 def _normalise_character_name(name: str) -> str:

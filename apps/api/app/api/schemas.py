@@ -220,6 +220,14 @@ class SceneIn(ApiModel):
     emotion: str
     information_revealed: str
     ending: str
+    # These fields are produced by the chapter-planner agent and are used as
+    # writing constraints. Keep them when persisting the plan instead of
+    # rejecting the otherwise valid AI response as extra input.
+    protagonist_want: str | None = None
+    active_pressure: str | None = None
+    choice_and_cost: str | None = None
+    irreversible_change: str | None = None
+    environment_pressure: str | None = None
     target_word_count: int | None = None
     target_word_min: int | None = None
     target_word_max: int | None = None

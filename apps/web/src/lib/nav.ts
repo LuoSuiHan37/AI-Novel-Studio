@@ -14,8 +14,8 @@ export type NavGroup = {
 export function getGlobalNav(): NavItem[] {
   return [
     { href: "/", label: "工作台" },
-    { href: "/projects", label: "项目" },
-    { href: "/research", label: "蒸馏小说" },
+    { href: "/projects", label: "作品库" },
+    { href: "/research", label: "参考研究" },
     { href: "/settings", label: "AI 设置" },
   ];
 }

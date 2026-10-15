@@ -202,6 +202,11 @@ class ScenePlan(DomainModel):
     emotion: str
     information_revealed: str
     ending: str
+    protagonist_want: str = ""
+    active_pressure: str = ""
+    choice_and_cost: str = ""
+    irreversible_change: str = ""
+    environment_pressure: str = ""
     target_word_count: int = 0
     target_word_min: int = 0
     target_word_max: int = 0

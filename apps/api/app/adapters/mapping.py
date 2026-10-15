@@ -366,6 +366,11 @@ def scene_to_domain(row: ScenePlanRow) -> ScenePlan:
         emotion=_text(row.emotion),
         information_revealed=_text(row.information_revealed),
         ending=_text(row.ending or row.outcome),
+        protagonist_want=_text((row.extra_metadata or {}).get("protagonist_want")),
+        active_pressure=_text((row.extra_metadata or {}).get("active_pressure")),
+        choice_and_cost=_text((row.extra_metadata or {}).get("choice_and_cost")),
+        irreversible_change=_text((row.extra_metadata or {}).get("irreversible_change")),
+        environment_pressure=_text((row.extra_metadata or {}).get("environment_pressure")),
         target_word_count=int((row.extra_metadata or {}).get("target_word_count", 0) or 0),
         target_word_min=int((row.extra_metadata or {}).get("target_word_min", 0) or 0),
         target_word_max=int((row.extra_metadata or {}).get("target_word_max", 0) or 0),
@@ -389,6 +394,11 @@ def apply_scene(row: ScenePlanRow, scene: ScenePlan) -> None:
         "target_word_count": scene.target_word_count,
         "target_word_min": scene.target_word_min,
         "target_word_max": scene.target_word_max,
+        "protagonist_want": scene.protagonist_want,
+        "active_pressure": scene.active_pressure,
+        "choice_and_cost": scene.choice_and_cost,
+        "irreversible_change": scene.irreversible_change,
+        "environment_pressure": scene.environment_pressure,
     }
     row.outcome = scene.ending
 

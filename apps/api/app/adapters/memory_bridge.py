@@ -90,7 +90,10 @@ async def hydrate_pipeline_memory(
         memory.store.add_record(record)
         memory.store.add_vector(
             VectorRecord(
-                **record.model_dump(),
+                # VectorRecord always uses the vector layer. Exclude the
+                # source record's layer before overriding it, otherwise
+                # Pydantic receives the same keyword twice.
+                **record.model_dump(exclude={"layer"}),
                 layer=MemoryLayer.VECTOR,
                 embedding=memory.embedder.embed(record.content),
             )

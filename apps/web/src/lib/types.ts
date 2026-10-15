@@ -8,6 +8,9 @@ export type Project = {
   chapter_count_target?: number | null;
   status: string;
   current_stage: string;
+  created_at?: string;
+  updated_at?: string;
+  logline?: string | null;
   extra_metadata?: Record<string, unknown>;
 };
 
@@ -163,6 +166,8 @@ export type Chapter = {
   status: string;
   content: string;
   word_count: number;
+  created_at?: string;
+  updated_at?: string;
   extra_metadata?: Record<string, unknown>;
 };
 

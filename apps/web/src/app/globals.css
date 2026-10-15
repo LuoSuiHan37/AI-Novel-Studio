@@ -49,38 +49,41 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --workspace-bg: #f5f7fb;
+  --background: #f5f7fb;
+  --foreground: #14213d;
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --secondary: #edf3ff;
+  --secondary-foreground: #1d4ed8;
+  --muted: #eef2f8;
+  --muted-foreground: #64748b;
+  --accent: #e8f0ff;
+  --accent-foreground: #1d4ed8;
+  --destructive: #dc2626;
+  --border: #dfe6f1;
+  --input: #d7e0ec;
+  --ring: #2563eb;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar: #ffffff;
+  --sidebar-foreground: #14213d;
+  --sidebar-primary: #2563eb;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #edf3ff;
+  --sidebar-accent-foreground: #1d4ed8;
+  --sidebar-border: #dfe6f1;
+  --sidebar-ring: #2563eb;
+  --shadow-card: 0 12px 32px rgba(35, 55, 95, 0.06);
+  --shadow-float: 0 20px 50px rgba(35, 55, 95, 0.1);
 }
 
 .dark {
@@ -123,8 +126,61 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif;
   }
   html {
     @apply font-sans;
+  }
+}
+
+@layer utilities {
+  .font-serif {
+    font-family: "STSong", "Songti SC", "Noto Serif CJK SC", Georgia, serif;
+  }
+
+  /* Keep the editor as the primary scroll surface; secondary panels stay quiet
+     until the user interacts with them. */
+  main[class~="overflow-y-auto"][class~="bg-white"] {
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+
+  main[class~="overflow-y-auto"][class~="bg-white"]::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  main[class~="overflow-y-auto"][class~="bg-white"] textarea[aria-label="章节正文"] {
+    height: auto;
+    min-height: calc(100dvh - 240px);
+    overflow: hidden;
+    field-sizing: content;
+  }
+
+  main[class~="overflow-y-auto"][class~="bg-white"] input[aria-label="章节标题"],
+  main[class~="overflow-y-auto"][class~="bg-white"] input[aria-label="章节标题"] + p {
+    text-align: center;
+  }
+
+  aside[class~="border-l"][class~="bg-white"] [class~="overflow-y-auto"][class~="p-4"],
+  aside[class~="overflow-y-auto"][class~="bg-white"][class~="p-4"] {
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+
+  aside[class~="border-l"][class~="bg-white"] [class~="overflow-y-auto"][class~="p-4"]::-webkit-scrollbar,
+  aside[class~="overflow-y-auto"][class~="bg-white"][class~="p-4"]::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
   }
 }

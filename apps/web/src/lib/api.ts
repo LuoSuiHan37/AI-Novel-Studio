@@ -166,11 +166,13 @@ export async function api<T>(
     const reviewKey = getStoredLlmKey(prefs?.reviewProvider);
     if (reviewKey) merged.set("X-Review-Api-Key", reviewKey);
   }
-  const url = `${getApiBase()}${path}`;
+  const requestPath = path.endsWith("/generate") ? `${path}/stream` : path;
+  const url = `${getApiBase()}${requestPath}`;
   let response: Response;
   try {
     response = await fetch(url, { ...rest, headers: merged });
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
     throw new ApiError(
       0,
       "network_error",
@@ -178,6 +180,30 @@ export async function api<T>(
     );
   }
   if (response.status === 204) return undefined as T;
+  if (response.headers.get("content-type")?.includes("text/event-stream")) {
+    const reader = response.body?.getReader();
+    if (!reader) throw new ApiError(0, "stream_error", "流式响应不可用");
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let donePayload: unknown;
+    while (true) {
+      const chunk = await reader.read();
+      buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done });
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() || "";
+      for (const frame of frames) {
+        const eventName = frame.match(/^event:\s*(.+)$/m)?.[1]?.trim() || "message";
+        const dataLine = frame.match(/^data:\s*(.+)$/m)?.[1];
+        if (!dataLine) continue;
+        const data = JSON.parse(dataLine) as Record<string, unknown>;
+        if (eventName === "error") throw new ApiError(500, "generation_error", String(data.message || "正文生成失败"));
+        if (eventName === "done") donePayload = data;
+        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("chapter-generation-event", { detail: { type: eventName, ...data } }));
+      }
+      if (chunk.done) break;
+    }
+    return donePayload as T;
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const err = payload.error || {};

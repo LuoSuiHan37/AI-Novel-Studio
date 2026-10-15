@@ -2,777 +2,84 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
-
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Field, StatusBanner } from "@/components/ui-bits";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertCircle, ArrowLeft, CheckCircle2, ChevronDown, Clock3, Code2, Focus, Image as ImageIcon, List, Menu, MoreHorizontal, PanelLeftClose, Plus, Redo2, Save, Sparkles, Undo2, Wand2, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { StatusBanner } from "@/components/ui-bits";
 import { api, ApiError } from "@/lib/api";
 import { confirmResource } from "@/lib/hitl";
 import { approvalStatusLabel, characterRoleLabel } from "@/lib/labels";
 import { evaluateAlphaNovelChecks } from "@/lib/platform-rules";
-import type {
-  Chapter,
-  ChapterPlan,
-  ChapterPlanSuggestion,
-  Character,
-  ContextPackPreview,
-  Hook,
-  MemoryItem,
-  ScenePlan,
-} from "@/lib/types";
+import type { Chapter, ChapterPlan, ChapterPlanSuggestion, Character, ContextPackPreview, Hook, MemoryItem, ScenePlan } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ensureCharactersForPlan, ensureWriteReady } from "@/lib/write-path";
 
-const REWRITE_OPS: { label: string; instruction: string }[] = [
-  { label: "重写", instruction: "Rewrite this chapter in stronger close-third werewolf romance voice. Keep canon facts." },
-  { label: "扩写", instruction: "Expand this chapter with more sensory pack-hall detail and interiority. Do not add new named characters." },
-  { label: "缩写", instruction: "Shorten this chapter. Keep the rejection beat and the cliffhanger." },
-  { label: "优化对话", instruction: "Improve dialogue only. Keep narration events the same." },
-  { label: "加强情绪", instruction: "Increase emotional intensity of the mate-bond wound without melodrama." },
-  { label: "加强浪漫", instruction: "Increase romantic tension and forbidden-pull while keeping the rejection." },
-  { label: "加悬念结尾", instruction: "End on a sharper cliffhanger hook. Keep prior events." },
-];
-
+const REWRITE_OPS = [{ label: "润色", instruction: "Polish the selected text for clarity and flow. Preserve meaning and canon facts." }, { label: "扩写", instruction: "Expand the selected text with sensory detail and character interiority. Do not add named characters." }, { label: "精简", instruction: "Shorten the selected text while preserving the event, emotion, and important facts." }];
 type ChapterPayload = { chapter: Chapter; plan: ChapterPlan | null; scenes: ScenePlan[] };
-type ChapterVersion = {
-  version: number;
-  prose?: string | null;
-  word_count: number;
-  score: number | null;
-  selected: boolean;
-  accepted: boolean;
-  rejection_reason?: string | null;
-};
-type RepetitionCheck = {
-  status: string;
-  blocked: boolean;
-  max_similarity: number;
-  matches: { chapter_number: number; similarity: number; repeated_paragraph_ratio: number; exact: boolean; reason: string }[];
-};
-type RelevanceCheck = {
-  status: string;
-  blocked: boolean;
-  score: number;
-  missing_requirements: string[];
-  reason?: string | null;
-};
+type Version = { version: number; prose?: string | null; word_count: number; score: number | null; selected: boolean; accepted: boolean; rejection_reason?: string | null };
+type Repetition = { status: string; blocked: boolean; max_similarity: number; matches: { chapter_number: number; reason: string }[] };
+type Relevance = { status: string; blocked: boolean; score: number; missing_requirements: string[] };
+type Tab = "plan" | "assistant" | "checks";
+type GenerationStatus = "idle" | "preparing" | "streaming" | "stopped" | "completed" | "failed";
+
+function IconButton({ label, children, onClick, disabled = false }: { label: string; children: React.ReactNode; onClick?: () => void; disabled?: boolean }) { return <button type="button" aria-label={label} title={label} onClick={onClick} disabled={disabled} className="flex size-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-40">{children}</button>; }
+function Field({ label, value, onChange, multiline = false, rows = 2 }: { label: string; value: string; onChange: (value: string) => void; multiline?: boolean; rows?: number }) { const c = "mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"; return <label className="block text-xs font-medium text-slate-500">{label}{multiline ? <textarea rows={rows} value={value} onChange={(e) => onChange(e.target.value)} className={c} /> : <input value={value} onChange={(e) => onChange(e.target.value)} className={c} />}</label>; }
 
 export default function ChapterEditorPage() {
-  const { projectId, chapterNo } = useParams<{ projectId: string; chapterNo: string }>();
-  const number = Number(chapterNo);
-  const [payload, setPayload] = useState<ChapterPayload | null>(null);
-  const [characters, setCharacters] = useState<Character[]>([]);
-  const [memory, setMemory] = useState<MemoryItem[]>([]);
-  const [hooks, setHooks] = useState<Hook[]>([]);
-  const [draft, setDraft] = useState("");
-  const [saved, setSaved] = useState("");
-  const [preview, setPreview] = useState<string | null>(null);
-  const [previewNote, setPreviewNote] = useState<string | null>(null);
-  const [continuity, setContinuity] = useState<string | null>(null);
-  const [planTitle, setPlanTitle] = useState("");
-  const [planGoal, setPlanGoal] = useState("");
-  const [planConflict, setPlanConflict] = useState("");
-  const [planEmotion, setPlanEmotion] = useState("");
-  const [planCliffhanger, setPlanCliffhanger] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [ok, setOk] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [showTools, setShowTools] = useState(false);
-  const [auditStage, setAuditStage] = useState<string | null>(null);
-  const [auditStatus, setAuditStatus] = useState<string | null>(null);
-  const [versions, setVersions] = useState<ChapterVersion[]>([]);
-  const [repetitionCheck, setRepetitionCheck] = useState<RepetitionCheck | null>(null);
-  const [relevanceCheck, setRelevanceCheck] = useState<RelevanceCheck | null>(null);
-  const [contextPack, setContextPack] = useState<ContextPackPreview | null>(null);
+  const { projectId, chapterNo } = useParams<{ projectId: string; chapterNo: string }>(); const number = Number(chapterNo);
+  const [payload, setPayload] = useState<ChapterPayload | null>(null); const [project, setProject] = useState<{ title?: string; metadata?: { cover_url?: string }; cover_url?: string } | null>(null); const [chapters, setChapters] = useState<Chapter[]>([]); const [characters, setCharacters] = useState<Character[]>([]); const [memory, setMemory] = useState<MemoryItem[]>([]); const [hooks, setHooks] = useState<Hook[]>([]);
+  const [draft, setDraft] = useState(""); const [saved, setSaved] = useState(""); const [planTitle, setPlanTitle] = useState(""); const [planGoal, setPlanGoal] = useState(""); const [planConflict, setPlanConflict] = useState(""); const [planEmotion, setPlanEmotion] = useState(""); const [planCliffhanger, setPlanCliffhanger] = useState("");
+  const [continuity, setContinuity] = useState<string | null>(null); const [contextPack, setContextPack] = useState<ContextPackPreview | null>(null); const [error, setError] = useState<string | null>(null); const [ok, setOk] = useState<string | null>(null); const [loading, setLoading] = useState(true); const [busy, setBusy] = useState<string | null>(null);
+  const [auditStage, setAuditStage] = useState<string | null>(null); const [auditStatus, setAuditStatus] = useState<string | null>(null); const [versions, setVersions] = useState<Version[]>([]); const [repetitionCheck, setRepetitionCheck] = useState<Repetition | null>(null); const [relevanceCheck, setRelevanceCheck] = useState<Relevance | null>(null);
+  const [generationStatus, setGenerationStatus] = useState<GenerationStatus>("idle"); const [candidateText, setCandidateText] = useState<string | null>(null); const [followGeneration, setFollowGeneration] = useState(true); const [showReturnToGeneration, setShowReturnToGenerationState] = useState(false);
+  const [activeTab, setActiveTab] = useState<Tab>("plan"); const [focusMode, setFocusMode] = useState(false); const [mobilePanel, setMobilePanel] = useState<"directory" | "assistant" | null>(null); const [selection, setSelection] = useState<{ start: number; end: number; text: string; version: number } | null>(null); const [selectionInstruction, setSelectionInstruction] = useState(""); const [selectionCandidate, setSelectionCandidate] = useState<string | null>(null); const [selectionNote, setSelectionNote] = useState<string | null>(null); const [saveError, setSaveError] = useState<string | null>(null); const [past, setPast] = useState<string[]>([]); const [future, setFuture] = useState<string[]>([]);
+  const editorRef = useRef<HTMLTextAreaElement | null>(null); const mainRef = useRef<HTMLElement | null>(null); const streamedCandidate = useRef(""); const draftVersion = useRef(0); const initialized = useRef(false); const saveInFlight = useRef(false); const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null); const animationTimer = useRef<ReturnType<typeof setInterval> | null>(null); const generationController = useRef<AbortController | null>(null); const generationRun = useRef(0); const stopRequested = useRef(false); const candidateMode = generationStatus !== "idle" || candidateText !== null; const dirty = draft !== saved;
+  const setShowReturnToGeneration = useCallback((visible: boolean) => { if (visible && (!draft.trim() || generationStatus === "preparing")) return; setShowReturnToGenerationState(visible); }, [draft, generationStatus]);
 
-  const dirty = draft !== saved;
+  const load = useCallback(async () => { const [chapter, people, mem, hookList, loadedProject, list] = await Promise.all([api<ChapterPayload>(`/projects/${projectId}/chapters/${number}`), api<Character[]>(`/projects/${projectId}/characters`).catch(() => []), api<MemoryItem[]>(`/projects/${projectId}/memory`).catch(() => []), api<Hook[]>(`/projects/${projectId}/hooks`).catch(() => []), api<{ title?: string; metadata?: { cover_url?: string }; cover_url?: string }>(`/projects/${projectId}`).catch(() => null), api<Chapter[]>(`/projects/${projectId}/chapters`).catch(() => [])]); setPayload(chapter); setCharacters(people); setMemory(mem); setHooks(hookList); setProject(loadedProject); setChapters(list); const text = chapter.chapter.content || ""; setDraft(text); setSaved(text); draftVersion.current += 1; initialized.current = true; const audit = chapter.chapter.extra_metadata?.audit as { status?: string; versions?: Version[]; repetition_check?: Repetition; relevance_check?: Relevance } | undefined; setAuditStatus(audit?.status || null); setVersions(audit?.versions || []); setRepetitionCheck(audit?.repetition_check || null); setRelevanceCheck(audit?.relevance_check || null); setPlanTitle(chapter.plan?.chapter_title || `未命名章节 ${number}`); setPlanGoal(chapter.plan?.chapter_goal || ""); setPlanConflict(chapter.plan?.conflict || ""); setPlanEmotion(chapter.plan?.emotional_arc || ""); setPlanCliffhanger(chapter.plan?.cliffhanger || ""); return chapter; }, [projectId, number]);
+useEffect(() => { load().catch((e: ApiError) => setError(e.message)).finally(() => setLoading(false)); }, [load]); // eslint-disable-line react-hooks/set-state-in-effect
+  useEffect(() => { const f = (e: BeforeUnloadEvent) => { if (dirty || candidateMode) { e.preventDefault(); e.returnValue = ""; } }; window.addEventListener("beforeunload", f); return () => window.removeEventListener("beforeunload", f); }, [dirty, candidateMode]);
+  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); if (animationTimer.current) clearInterval(animationTimer.current); generationController.current?.abort(); }, []);
+  useEffect(() => { if (!candidateMode || !followGeneration) return; const main = mainRef.current; if (main) main.scrollTop = main.scrollHeight; }, [draft, candidateMode, followGeneration]);
+  useEffect(() => { const editor = editorRef.current; if (!editor) return; editor.style.height = "0px"; editor.style.height = `${editor.scrollHeight}px`; }, [draft]);
+  useEffect(() => { const onGenerationEvent = (event: Event) => { const detail = (event as CustomEvent<{ type: string; stage?: string; text?: string }>).detail; if (detail.type === "stage") setGenerationStatus(detail.stage === "streaming" ? "streaming" : "preparing"); if (detail.type === "delta" && detail.text) { streamedCandidate.current += detail.text; setGenerationStatus("streaming"); setDraft(streamedCandidate.current); } }; window.addEventListener("chapter-generation-event", onGenerationEvent); return () => window.removeEventListener("chapter-generation-event", onGenerationEvent); }, []);
+  const relevantMemory = useMemo(() => memory.filter((item) => !item.chapter_number || Math.abs((item.chapter_number || 0) - number) <= 3).slice(0, 8), [memory, number]);
+  const checks = useMemo(() => evaluateAlphaNovelChecks({ prose: draft, conflict: planConflict, emotionalArc: planEmotion, cliffhanger: planCliffhanger, chapterGoal: planGoal }), [draft, planConflict, planEmotion, planCliffhanger, planGoal]);
+  const pending = checks.filter((item) => !item.ok).length + (repetitionCheck?.blocked ? 1 : 0) + (relevanceCheck?.blocked ? 1 : 0); const projectTitle = project?.title || "当前小说"; const approved = ["approved", "published"].includes(payload?.chapter.status || ""); const manualReview = !approved && ["reviewed", "failed", "completed_with_errors", "not_configured", "passed"].includes(payload?.chapter.status === "reviewed" ? "reviewed" : auditStatus || "");
+  async function run(label: string, fn: () => Promise<void>) { setBusy(label); setError(null); setOk(null); try { await fn(); } catch (e) { setError(e instanceof ApiError ? e.message : `${label}失败`); } finally { setBusy(null); } }
+  function applyDraft(next: string) { setPast((p) => [...p, draft].slice(-30)); setFuture([]); setDraft(next); draftVersion.current += 1; setSelection(null); setSelectionCandidate(null); setOk("局部修改已替换原选区，可撤销或保存。"); }
+  function undo() { const old = past.at(-1); if (old === undefined) return; setFuture((f) => [...f, draft]); setPast((p) => p.slice(0, -1)); setDraft(old); draftVersion.current += 1; }
+  function redo() { const next = future.at(-1); if (next === undefined) return; setPast((p) => [...p, draft]); setFuture((f) => f.slice(0, -1)); setDraft(next); draftVersion.current += 1; }
+  async function save() { if (!dirty || candidateMode || saveInFlight.current) return; const content = draft; saveInFlight.current = true; setSaveError(null); setBusy("保存"); try { await api(`/projects/${projectId}/chapters/${number}`, { method: "PATCH", projectId, body: JSON.stringify({ content, title: planTitle, audit: null }) }); if (draft === content) { setSaved(content); setAuditStatus(null); setVersions([]); setAuditStage("正文已修改，等待重新独立审查"); setOk("已保存为新修订版本。"); } } catch (e) { const message = e instanceof ApiError ? e.message : "保存失败"; setSaveError(message); setError(message); } finally { saveInFlight.current = false; setBusy(null); } }
+  useEffect(() => { if (!initialized.current || !dirty || candidateMode || saveInFlight.current) return; if (saveTimer.current) clearTimeout(saveTimer.current); saveTimer.current = setTimeout(() => void save(), 1200); return () => { if (saveTimer.current) clearTimeout(saveTimer.current); }; }, [draft, dirty, candidateMode]);
+  function leave(e: React.MouseEvent<HTMLAnchorElement>) { if (dirty && !window.confirm("本章有未保存修改，确定离开吗？")) e.preventDefault(); }
+  function selectText() { const el = editorRef.current; if (!el || el.selectionStart === el.selectionEnd) { setSelection(null); return; } const start = el.selectionStart; const end = el.selectionEnd; setSelection({ start, end, text: draft.slice(start, end), version: draftVersion.current }); setActiveTab("assistant"); }
+  async function propose(instruction: string) { if (!selection || busy) return; const selected = selection; setSelectionInstruction(instruction); setSelectionCandidate(null); await run("生成局部修改", async () => { const result = await api<{ prose: string; change_summary: string }>(`/projects/${projectId}/chapters/${number}/propose-edit`, { method: "POST", projectId, body: JSON.stringify({ instruction, source_prose: selected.text, persist: false }) }); if (draftVersion.current !== selected.version || draft.slice(selected.start, selected.end) !== selected.text) { setSelectionNote("正文在请求期间已变化，候选结果未自动应用。请重新选择原文。"); return; } setSelectionCandidate(result.prose); setSelectionNote(result.change_summary || "候选修改已生成，尚未覆盖正文。"); }); }
+  function adopt() { if (!selection || selectionCandidate === null) return; if (draftVersion.current !== selection.version || draft.slice(selection.start, selection.end) !== selection.text) { setError("正文或选区已变化，已阻止错位替换。"); return; } applyDraft(`${draft.slice(0, selection.start)}${selectionCandidate}${draft.slice(selection.end)}`); }
+  async function ensurePlanApproved() { let current = payload; const edited = !!current?.plan && [planTitle !== current.plan.chapter_title, planGoal !== current.plan.chapter_goal, planConflict !== current.plan.conflict, planEmotion !== current.plan.emotional_arc, planCliffhanger !== current.plan.cliffhanger].some(Boolean); if (!current?.plan || !current.scenes.length || edited) { let body: ChapterPlanSuggestion; if (!current?.plan || !current.scenes.length) body = await api<ChapterPlanSuggestion>(`/projects/${projectId}/chapters/plan-suggestion`, { method: "POST", projectId, body: JSON.stringify({ chapter_number: number }) }); else body = { chapter_number: number, chapter_title: planTitle, pov: current.plan.pov, location: current.plan.location, characters: current.plan.characters, chapter_goal: planGoal, conflict: planConflict, emotional_arc: planEmotion, new_information: current.plan.new_information, reveal: current.plan.reveal, foreshadowing: current.plan.foreshadowing, setup: current.plan.setup, payoff: current.plan.payoff, cliffhanger: planCliffhanger, target_word_count: current.plan.target_word_count, target_word_min: current.plan.target_word_min, target_word_max: current.plan.target_word_max, scenes: current.scenes.map((s) => ({ scene_number: s.scene_number, location: s.location, characters: s.characters, goal: s.goal, conflict: s.conflict, turning_point: s.turning_point, dialogue_goal: s.dialogue_goal, emotion: s.emotion, information_revealed: s.information_revealed, ending: s.ending, target_word_count: s.target_word_count, target_word_min: s.target_word_min, target_word_max: s.target_word_max })) }; await api(`/projects/${projectId}/chapters/plan`, { method: "POST", projectId, body: JSON.stringify(body) }); current = await load(); } if (!current?.plan) throw new ApiError(400, "invalid_state", "章节计划创建失败"); await ensureCharactersForPlan(projectId, current.plan.characters); if (current.plan.status !== "approved") { await confirmResource(`/projects/${projectId}/chapters/${number}/plan/submit`, `/projects/${projectId}/chapters/${number}/plan/approve`, projectId); await load(); } }
+  async function generatePlan() { const s = await api<ChapterPlanSuggestion>(`/projects/${projectId}/chapters/plan-suggestion`, { method: "POST", projectId, body: JSON.stringify({ chapter_number: number }) }); await api(`/projects/${projectId}/chapters/plan`, { method: "POST", projectId, body: JSON.stringify(s) }); await load(); setOk("AI 章节计划已保存；修改计划后需要重新批准。"); }
+  async function context() { setContextPack(await api<ContextPackPreview>(`/projects/${projectId}/chapters/${number}/context-pack`, { projectId })); }
+  function assertGenerationActive(runId: number) { if (stopRequested.current || generationRun.current !== runId) throw new DOMException("Generation stopped", "AbortError"); }
+  function startCandidateAnimation(text: string, runId: number) { if (streamedCandidate.current) { streamedCandidate.current = ""; setCandidateText(text); setDraft(text); setGenerationStatus("completed"); setFollowGeneration(true); setOk("正文生成完成，当前为候选稿；确认后再采用。"); return; } if (animationTimer.current) clearInterval(animationTimer.current); const chars = Array.from(text); let index = 0; setCandidateText(text); setDraft(""); setGenerationStatus("streaming"); setFollowGeneration(true); animationTimer.current = setInterval(() => { if (stopRequested.current || generationRun.current !== runId) { if (animationTimer.current) clearInterval(animationTimer.current); return; } index = Math.min(chars.length, index + (chars.length - index > 160 ? 3 : 1)); setDraft(chars.slice(0, index).join("")); if (index >= chars.length) { if (animationTimer.current) clearInterval(animationTimer.current); animationTimer.current = null; setGenerationStatus("completed"); setOk("正文生成完成，当前为候选稿；确认后再采用。"); } }, 25); }
+  function stopGeneration() { stopRequested.current = true; generationController.current?.abort(); if (animationTimer.current) { clearInterval(animationTimer.current); animationTimer.current = null; } streamedCandidate.current = ""; if (generationStatus !== "idle" && generationStatus !== "completed") setGenerationStatus("stopped"); }
+  function adoptGenerated() { if (candidateText === null) return; const generated = candidateText; if (animationTimer.current) clearInterval(animationTimer.current); setPast((p) => [...p, saved].slice(-30)); setFuture([]); setCandidateText(null); setGenerationStatus("idle"); setDraft(generated); draftVersion.current += 1; setOk("已采用候选稿，正在按现有机制保存正文。"); }
+  function discardGenerated() { if (animationTimer.current) clearInterval(animationTimer.current); streamedCandidate.current = ""; setDraft(saved); setCandidateText(null); setGenerationStatus("idle"); setFollowGeneration(true); setOk("已放弃候选稿，正文保持不变。"); }
+  async function generate() { const runId = generationRun.current + 1; generationRun.current = runId; stopRequested.current = false; generationController.current = new AbortController(); setCandidateText(null); setGenerationStatus("preparing"); setAuditStatus("processing"); setAuditStage("准备章节上下文"); try { await ensureWriteReady(projectId, number); assertGenerationActive(runId); await load(); await ensurePlanApproved(); assertGenerationActive(runId); setAuditStage("生成正文并执行独立审查"); const r = await api<{ writer: { title: string; prose: string }; editor: { overall_notes: string }; continuity: { overall: string }; review_status: string; versions: Version[]; length_warning: string | null; repetition_check: Repetition; relevance_check: Relevance; auto_approved: boolean }>(`/projects/${projectId}/chapters/${number}/generate`, { method: "POST", projectId, signal: generationController.current.signal, body: JSON.stringify({ persist: true, human_notes: "Write the planned chapter." }) }); assertGenerationActive(runId); setAuditStatus(r.review_status); setAuditStage(r.review_status === "completed" ? "独立审查完成，已选择最佳版本" : "审查完成，等待修订"); setVersions(r.versions || []); setRepetitionCheck(r.repetition_check); setRelevanceCheck(r.relevance_check); setContinuity(`${r.editor.overall_notes} · ${r.continuity.overall}`); startCandidateAnimation(r.writer.prose, runId); } catch (e) { if (e instanceof DOMException && e.name === "AbortError") { setGenerationStatus("stopped"); setOk("已停止生成，已收到的候选内容仍然保留。"); return; } setGenerationStatus("failed"); throw e; } finally { generationController.current = null; } }
+  async function review() { const r = await api<{ reviewed?: boolean; review_status?: string }>(`/projects/${projectId}/chapters/${number}/review`, { method: "POST", projectId }); setAuditStatus(r.review_status || (r.reviewed ? "passed" : "failed")); setAuditStage(r.reviewed ? "审查通过，可以批准章节" : "审查未通过，请修订正文"); await load(); }
+  async function approve() { await api(`/projects/${projectId}/chapters/${number}/approve`, { method: "POST", projectId, body: JSON.stringify({ confirmed_by: "studio-user" }) }); await load(); setOk("章节已批准，故事记忆已沉淀。"); }
+  const cover = project?.metadata?.cover_url || project?.cover_url; const generating = generationStatus === "preparing" || generationStatus === "streaming"; const saveLabel = candidateMode ? "候选稿未采用" : saveError ? "保存失败" : busy === "保存" ? "保存中" : dirty ? "未保存" : "已自动保存"; const generationLabel = generationStatus === "preparing" ? "正在准备正文 · 正在整理章节上下文" : generationStatus === "streaming" ? "正在生成" : generationStatus === "stopped" ? "已停止" : generationStatus === "completed" ? "生成完成" : generationStatus === "failed" ? "生成失败" : "";
 
-  const load = useCallback(async () => {
-    const [chapter, people, mem, hookList] = await Promise.all([
-      api<ChapterPayload>(`/projects/${projectId}/chapters/${number}`),
-      api<Character[]>(`/projects/${projectId}/characters`).catch(() => []),
-      api<MemoryItem[]>(`/projects/${projectId}/memory`).catch(() => []),
-      api<Hook[]>(`/projects/${projectId}/hooks`).catch(() => []),
-    ]);
-    setPayload(chapter);
-    setCharacters(people);
-    setMemory(mem);
-    setHooks(hookList);
-    setDraft(chapter.chapter.content || "");
-    setSaved(chapter.chapter.content || "");
-    const audit = chapter.chapter.extra_metadata?.audit as {
-      status?: string;
-      versions?: ChapterVersion[];
-      repetition_check?: RepetitionCheck;
-      relevance_check?: RelevanceCheck;
-    } | undefined;
-    setAuditStatus(audit?.status || null);
-    setVersions(audit?.versions || []);
-    setRepetitionCheck(audit?.repetition_check || null);
-    setRelevanceCheck(audit?.relevance_check || null);
-    setPlanTitle(
-      chapter.plan?.chapter_title || (number === 1 ? "The Rejection" : `Untitled Chapter ${number}`),
-    );
-    setPlanGoal(chapter.plan?.chapter_goal || "");
-    setPlanConflict(chapter.plan?.conflict || "");
-    setPlanEmotion(chapter.plan?.emotional_arc || "");
-    setPlanCliffhanger(chapter.plan?.cliffhanger || "");
-    return chapter;
-  }, [projectId, number]);
-
-  useEffect(() => {
-    load()
-      .catch((err: ApiError) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [load]);
-
-  const relevantMemory = useMemo(
-    () => memory.filter((item) => !item.chapter_number || Math.abs((item.chapter_number || 0) - number) <= 3).slice(0, 8),
-    [memory, number],
-  );
-
-  const platformChecks = useMemo(
-    () =>
-      evaluateAlphaNovelChecks({
-        prose: draft,
-        conflict: planConflict,
-        emotionalArc: planEmotion,
-        cliffhanger: planCliffhanger,
-        chapterGoal: planGoal,
-      }),
-    [draft, planConflict, planEmotion, planCliffhanger, planGoal],
-  );
-
-  async function run(label: string, fn: () => Promise<void>) {
-    setBusy(label);
-    setError(null);
-    setOk(null);
-    try {
-      await fn();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : `${label}失败`);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  const planStatus = payload?.plan?.status || "draft";
-  const chapterStatus = payload?.chapter?.status || "draft";
-  const chapterApproved = chapterStatus === "approved" || chapterStatus === "published";
-  const manualReviewNeeded = !chapterApproved && (
-    chapterStatus === "reviewed" ||
-    auditStatus === "failed" ||
-    auditStatus === "completed_with_errors" ||
-    auditStatus === "not_configured" ||
-    auditStatus === "passed"
-  );
-  const canGenerate = !dirty;
-
-  async function ensurePlanApproved(): Promise<void> {
-    let current = payload;
-    const editedPlan = !!current?.plan && (
-      planTitle !== current.plan.chapter_title ||
-      planGoal !== current.plan.chapter_goal ||
-      planConflict !== current.plan.conflict ||
-      planEmotion !== current.plan.emotional_arc ||
-      planCliffhanger !== current.plan.cliffhanger
-    );
-    const needsNewPlan =
-      !current?.plan ||
-      !current.scenes.length ||
-      editedPlan;
-
-    if (needsNewPlan) {
-      let planBody: ChapterPlanSuggestion;
-      if (!current?.plan || !current.scenes.length) {
-        planBody = await api<ChapterPlanSuggestion>(
-          `/projects/${projectId}/chapters/plan-suggestion`,
-          {
-            method: "POST",
-            projectId,
-            body: JSON.stringify({ chapter_number: number }),
-          },
-        );
-      } else {
-        planBody = {
-          chapter_number: number,
-          chapter_title: planTitle,
-          pov: current.plan.pov,
-          location: current.plan.location,
-          characters: current.plan.characters,
-          chapter_goal: planGoal,
-          conflict: planConflict,
-          emotional_arc: planEmotion,
-          new_information: current.plan.new_information,
-          reveal: current.plan.reveal,
-          foreshadowing: current.plan.foreshadowing,
-          setup: current.plan.setup,
-          payoff: current.plan.payoff,
-          cliffhanger: planCliffhanger,
-          target_word_count: current.plan.target_word_count,
-          target_word_min: current.plan.target_word_min,
-          target_word_max: current.plan.target_word_max,
-          scenes: current.scenes.map((scene) => ({
-            scene_number: scene.scene_number,
-            location: scene.location,
-            characters: scene.characters,
-            goal: scene.goal,
-            conflict: scene.conflict,
-            turning_point: scene.turning_point,
-            dialogue_goal: scene.dialogue_goal,
-            emotion: scene.emotion,
-            information_revealed: scene.information_revealed,
-            ending: scene.ending,
-            target_word_count: scene.target_word_count,
-            target_word_min: scene.target_word_min,
-            target_word_max: scene.target_word_max,
-          })),
-        };
-      }
-      await api(`/projects/${projectId}/chapters/plan`, {
-        method: "POST",
-        projectId,
-        body: JSON.stringify(planBody),
-      });
-      current = await load();
-    }
-
-    if (!current?.plan) {
-      throw new ApiError(400, "invalid_state", "章节计划创建失败");
-    }
-    await ensureCharactersForPlan(projectId, current.plan.characters);
-    if (current.plan.status !== "approved") {
-      await confirmResource(
-        `/projects/${projectId}/chapters/${number}/plan/submit`,
-        `/projects/${projectId}/chapters/${number}/plan/approve`,
-        projectId,
-      );
-      await load();
-    }
-  }
-
-  async function generatePlan() {
-    const suggestion = await api<ChapterPlanSuggestion>(
-      `/projects/${projectId}/chapters/plan-suggestion`,
-      {
-        method: "POST",
-        projectId,
-        body: JSON.stringify({ chapter_number: number }),
-      },
-    );
-    await api(`/projects/${projectId}/chapters/plan`, {
-      method: "POST",
-      projectId,
-      body: JSON.stringify(suggestion),
-    });
-    await load();
-    setOk("AI 章节计划已保存为新草稿版本。检查计划并批准后即可生成正文。");
-  }
-
-  async function previewContextPack() {
-    const result = await api<ContextPackPreview>(
-      `/projects/${projectId}/chapters/${number}/context-pack`,
-      { projectId },
-    );
-    setContextPack(result);
-  }
-
-  return (
-    <section className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-semibold">第 {number} 章工作台</h1>
-          <p className="text-xs text-muted-foreground">
-            计划状态：{approvalStatusLabel(planStatus)} ·{" "}
-            {dirty ? "有未保存修改 — AI 不会覆盖正文，除非你应用预览。" : "已保存"}
-          </p>
-        </div>
-      </div>
-      <StatusBanner loading={loading} error={error} ok={ok} />
-      {!loading ? (
-        <p className={cn(
-          "rounded-md border px-3 py-2 text-xs",
-          chapterApproved
-            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-            : manualReviewNeeded
-            ? "border-amber-200 bg-amber-50 text-amber-700"
-            : "bg-muted/30 text-muted-foreground",
-        )}>
-          {chapterApproved
-            ? "自动流程已完成：章节已批准，章节摘要、场景交接和人物认知已自动沉淀到故事记忆。"
-            : manualReviewNeeded
-            ? "自动流程需要人工兜底：请根据下方审查结果修订或确认本章。"
-            : "正常流程：生成正文后系统会自动执行审查；只有审查未通过时才需要人工处理。"}
-        </p>
-      ) : null}
-      {!loading && characters.length === 0 ? (
-        <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-          还没有角色。生成章节计划后，计划中出现的人物会逐个自动加入本书角色库。
-        </p>
-      ) : null}
-
-      <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!!busy || dirty}
-          onClick={() => void run("AI 生成章节计划", generatePlan)}
-        >
-          AI 生成/重做计划
-        </Button>
-        <Button
-          size="sm"
-          disabled={!!busy || !canGenerate}
-          title={dirty ? "请先保存或丢弃本地修改" : "缺角色或计划时会自动补齐，再生成正文预览"}
-          onClick={() =>
-            void run("生成本章", async () => {
-              setAuditStatus("processing");
-              setVersions([]);
-              setAuditStage("准备章节上下文");
-              await ensureWriteReady(projectId, number);
-              await load();
-              await ensurePlanApproved();
-              setAuditStage("生成正文并执行独立审查");
-              const result = await api<{
-                writer: { title: string; prose: string };
-                editor: { overall_notes: string; needs_human_review: boolean };
-                continuity: { overall: string; findings: { problem: string; recommendation: string }[] };
-                revision_suggestion: { change_summary: string } | null;
-                review_status: string;
-                versions: ChapterVersion[];
-                length_ok: boolean;
-                length_warning: string | null;
-                repetition_check: RepetitionCheck;
-                relevance_check: RelevanceCheck;
-                auto_approved: boolean;
-              }>(
-                `/projects/${projectId}/chapters/${number}/generate`,
-                {
-                  method: "POST",
-                  projectId,
-                  body: JSON.stringify({ persist: true, human_notes: "Write the planned chapter." }),
-                },
-              );
-              setAuditStage(
-                result.review_status === "completed"
-                  ? "独立审查完成，已选择最佳版本"
-                  : result.review_status === "completed_with_errors"
-                  ? "独立审查完成，但发现问题，等待修订"
-                  : "未执行独立审查，仅生成 V1 草稿"
-              );
-              setAuditStatus(result.review_status);
-              setVersions(result.versions || []);
-              setRepetitionCheck(result.repetition_check);
-              setRelevanceCheck(result.relevance_check);
-              setPreview(result.writer.prose);
-              const checks = [
-                `编辑检查：${result.editor.overall_notes}`,
-                `一致性：${result.continuity.overall}${result.continuity.findings.length ? `（${result.continuity.findings.map((item) => item.problem).join("；")}）` : ""}`,
-                result.revision_suggestion
-                  ? `已按检查意见自动修订：${result.revision_suggestion.change_summary}`
-                  : "检查未发现需要自动修订的问题",
-              ].join(" · ");
-              setContinuity(checks);
-              const repetitionNote = result.repetition_check.blocked
-                ? `重复检查阻断：${result.repetition_check.matches.map((item) => `与第 ${item.chapter_number} 章${item.reason}`).join("；")}`
-                : "重复检查通过";
-              const relevanceNote = result.relevance_check?.blocked
-                ? `计划相关性阻断：${result.relevance_check.missing_requirements.join("；")}`
-                : "计划相关性检查通过";
-              setPreviewNote(
-                `AI 正文《${result.writer.title}》已保存。${result.length_warning ? `${result.length_warning} ` : ""}${repetitionNote}；${relevanceNote}。${checks}`,
-              );
-              if (result.auto_approved) {
-                await load();
-                setOk(result.length_warning ? `${result.length_warning}章节已自动审核并批准。` : "章节已自动生成、审核并批准。" );
-              } else if (result.review_status === "completed" && !result.repetition_check.blocked && !result.relevance_check?.blocked) {
-                setAuditStage("自动独立审查并批准章节");
-                await api(`/projects/${projectId}/chapters/${number}/review`, { method: "POST", projectId });
-                await api(`/projects/${projectId}/chapters/${number}/approve`, {
-                  method: "POST",
-                  projectId,
-                  body: JSON.stringify({ confirmed_by: "system-auto" }),
-                });
-                await load();
-                setOk(result.length_warning ? `${result.length_warning}章节已自动审核并批准。` : "章节已自动生成、审核并批准。" );
-              } else {
-                setOk("章节已保存，但自动审核未通过；系统已暂停批准并保留问题记录。" );
-              }
-            })
-          }
-        >
-          {busy === "生成本章" ? "生成中…" : "生成本章"}
-        </Button>
-        {manualReviewNeeded ? <span className="self-center text-xs text-amber-700">人工兜底</span> : null}
-        {manualReviewNeeded && chapterStatus !== "reviewed" ? <Button
-          size="sm"
-          variant="outline"
-          disabled={!!busy || dirty || !draft.trim()}
-          onClick={() =>
-            void run("完成审查", async () => {
-              const result = await api<{
-                chapter: Chapter;
-                reviewed?: boolean;
-                review_status?: string;
-                continuity?: { overall: string; findings: { problem: string }[] };
-              }>(`/projects/${projectId}/chapters/${number}/review`, { method: "POST", projectId });
-              setAuditStatus(result.review_status || (result.reviewed ? "passed" : "failed"));
-              setAuditStage(result.reviewed ? "审查通过，可以批准章节" : "审查未通过，请根据问题修订正文");
-              setContinuity(
-                result.continuity
-                  ? `${result.continuity.overall}${result.continuity.findings.length ? `：${result.continuity.findings.map((item) => item.problem).join("；")}` : ""}`
-                  : null,
-              );
-              await load();
-              setOk(result.reviewed ? "章节审查通过，现在可以批准章节。" : "章节审查未通过，请先修订正文。 ");
-            })
-          }
-        >
-          {busy === "完成审查" ? "审查中…" : "完成审查"}
-        </Button> : null}
-        {manualReviewNeeded ? <Button
-          size="sm"
-          disabled={!!busy || chapterStatus !== "reviewed"}
-          title={chapterStatus !== "reviewed" ? "请先完成审查并通过" : "批准后才会写入长期故事记忆"}
-          onClick={() =>
-            void run("批准章节", async () => {
-              await api(`/projects/${projectId}/chapters/${number}/approve`, {
-                method: "POST",
-                projectId,
-                body: JSON.stringify({ confirmed_by: "studio-user" }),
-              });
-              await load();
-              setOk("章节已批准，摘要、场景交接和人物认知已写入长期记忆。 ");
-              setAuditStage("章节已批准，长期记忆已沉淀");
-            })
-          }
-        >
-          批准章节
-        </Button> : null}
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!!busy}
-          onClick={() => void run("预览上下文", previewContextPack)}
-        >
-          预览生成上下文
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!!busy || !dirty}
-          onClick={() =>
-            void run("保存", async () => {
-              await api(`/projects/${projectId}/chapters/${number}`, {
-                method: "PATCH",
-                projectId,
-                body: JSON.stringify({ content: draft, title: planTitle, audit: null }),
-              });
-              setSaved(draft);
-              setAuditStatus(null);
-              setAuditStage("正文已修改，等待重新独立审查");
-              setVersions([]);
-              setOk("已保存为新修订版本。");
-            })
-          }
-        >
-          保存
-        </Button>
-        <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => setShowTools((value) => !value)}>
-          {showTools ? "收起改稿工具" : "改稿工具"}
-        </Button>
-      </div>
-
-      {showTools ? (
-        <div className="flex flex-wrap gap-2 rounded-lg border bg-muted/20 p-3">
-          {REWRITE_OPS.map((op) => (
-            <Button
-              key={op.label}
-              size="sm"
-              variant="outline"
-              disabled={!!busy || !draft.trim()}
-              onClick={() =>
-                void run(op.label, async () => {
-                  const result = await api<{ prose: string; change_summary: string }>(
-                    `/projects/${projectId}/chapters/${number}/propose-edit`,
-                    {
-                      method: "POST",
-                      projectId,
-                      body: JSON.stringify({ instruction: op.instruction, source_prose: draft, persist: false }),
-                    },
-                  );
-                  setPreview(result.prose);
-                  setPreviewNote(result.change_summary || op.label);
-                })
-              }
-            >
-              {op.label}
-            </Button>
-          ))}
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!!busy || !draft.trim()}
-            onClick={() =>
-              void run("一致性检查", async () => {
-                if (dirty) {
-                  setError("一致性检查读取已保存正文，请先保存或丢弃本地修改。");
-                  return;
-                }
-                const result = await api<{
-                  continuity: { overall: string; findings: { problem: string }[] };
-                  review_status: string;
-                }>(
-                  `/projects/${projectId}/chapters/${number}/continuity`,
-                  { method: "POST", projectId },
-                );
-                const findings = result.continuity.findings.map((item) => item.problem).join(" · ");
-                setContinuity(`${result.continuity.overall}${findings ? `: ${findings}` : ""}`);
-                setAuditStatus(result.review_status);
-                setAuditStage(
-                  result.review_status === "failed"
-                    ? "一致性检查发现问题，等待修订"
-                    : "一致性检查完成；批准前仍需完整独立审查"
-                );
-              })
-            }
-          >
-            一致性检查
-          </Button>
-        </div>
-      ) : null}
-
-      {busy ? <p className="text-xs text-muted-foreground">{busy}… {auditStage || "正在处理"}</p> : null}
-
-      {contextPack ? (
-        <section className="space-y-2 rounded-lg border bg-muted/20 p-3 text-sm">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="font-medium">本章生成上下文预览</h2>
-            <Button size="sm" variant="ghost" onClick={() => setContextPack(null)}>关闭</Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            第 {contextPack.chapter_number} 章 · 预计上下文 {contextPack.memory_package.token_estimate} tokens
-            {contextPack.memory_package.dropped_for_budget
-              ? ` · 因预算省略 ${contextPack.memory_package.dropped_for_budget} 项`
-              : " · 未省略记忆"}
-          </p>
-          <div className="grid gap-2 md:grid-cols-3">
-            <div className="rounded-md border bg-background p-2">
-              <p className="text-xs font-medium">当前故事弧</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {contextPack.story_arc
-                  ? `${contextPack.story_arc.title}（${contextPack.story_arc.start_chapter_number}-${contextPack.story_arc.end_chapter_number}）`
-                  : "未匹配故事弧"}
-              </p>
-            </div>
-            <div className="rounded-md border bg-background p-2">
-              <p className="text-xs font-medium">未解决钩子</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {contextPack.memory_package.unresolved_hooks.length
-                  ? contextPack.memory_package.unresolved_hooks.join("；")
-                  : "暂无"}
-              </p>
-            </div>
-            <div className="rounded-md border bg-background p-2">
-              <p className="text-xs font-medium">禁止知识</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {Object.keys(contextPack.context.forbidden_knowledge).length
-                  ? Object.entries(contextPack.context.forbidden_knowledge)
-                      .map(([name, facts]) => `${name}：${facts.join("、")}`)
-                      .join("；")
-                  : "暂无"}
-              </p>
-            </div>
-          </div>
-          <details>
-            <summary className="cursor-pointer text-xs font-medium">查看带入记忆与伏笔</summary>
-            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-background p-2 text-xs">
-              {contextPack.visible_text}
-            </pre>
-          </details>
-        </section>
-      ) : null}
-
-      {auditStage || versions.length || auditStatus || repetitionCheck || relevanceCheck ? (
-        <section className="space-y-2 rounded-lg border bg-muted/20 p-3 text-sm">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="font-medium">章节审查流程</h2>
-            <span className={cn(
-              "rounded-full px-2 py-1 text-xs",
-              auditStatus === "completed" || auditStatus === "passed"
-                ? "bg-emerald-100 text-emerald-700"
-                : auditStatus === "failed" || auditStatus === "completed_with_errors"
-                ? "bg-rose-100 text-rose-700"
-                : "bg-amber-100 text-amber-700",
-            )}>
-              {auditStatus === "completed"
-                ? "独立审查完成"
-                : auditStatus === "completed_with_errors"
-                ? "审查发现问题"
-                : auditStatus === "passed"
-                ? "审查通过"
-                : auditStatus === "failed"
-                ? "审查未通过"
-                : auditStatus === "not_configured"
-                ? "未配置独立审查"
-                : "处理中"}
-            </span>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {auditStage || "生成后会在这里显示审查和版本选择结果。"}
-          </p>
-          {auditStatus === "not_configured" ? (
-            <p className="text-xs text-amber-700">请在 AI 设置中配置与生成模型不同的审查模型，章节才能批准。</p>
-          ) : null}
-          {repetitionCheck?.blocked ? (
-            <p className="text-xs text-red-700">
-              重复检查已阻断：{repetitionCheck.matches.map((item) => `第 ${item.chapter_number} 章（${item.reason}）`).join("、")}。修改正文后才能审核和批准。
-            </p>
-          ) : repetitionCheck ? (
-            <p className="text-xs text-emerald-700">重复检查通过，未发现需要阻断的历史章节重复。</p>
-          ) : null}
-          {relevanceCheck?.blocked ? (
-            <p className="text-xs text-red-700">
-              计划相关性检查已阻断：{relevanceCheck.missing_requirements.join("、")}。修改正文使其完成本章计划后才能审核和批准。
-            </p>
-          ) : relevanceCheck ? (
-            <p className="text-xs text-emerald-700">计划相关性检查通过（评分 {relevanceCheck.score}）。</p>
-          ) : null}
-          {versions.length ? (
-            <div className="grid gap-2 md:grid-cols-3">
-              {versions.map((item) => (
-                <div key={item.version} className={cn("rounded-md border p-2 text-xs", item.selected && "border-emerald-500 bg-emerald-50")}>
-                  <div className="flex justify-between font-medium">
-                    <span>V{item.version}</span>
-                    <span>{item.selected ? "已选择" : item.accepted ? "候选" : "已淘汰"}</span>
-                  </div>
-                  <p className="text-muted-foreground">{item.score === null ? "未评分" : `评分 ${item.score.toFixed(1)}`} · {item.word_count} 词</p>
-                  {item.rejection_reason ? <p className="mt-1 text-rose-700">{item.rejection_reason}</p> : null}
-                  {item.prose ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="mt-1 h-7 px-1 text-xs"
-                      onClick={() => {
-                        setPreview(item.prose || null);
-                        setPreviewNote(`V${item.version} 版本正文（查看后可选择应用）`);
-                      }}
-                    >
-                      查看正文
-                    </Button>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      <div className="grid min-h-[70vh] gap-3 lg:grid-cols-[240px_minmax(0,1fr)_260px]">
-        <aside className="space-y-3 rounded-lg border p-3 text-sm">
-          <h2 className="font-medium">章节计划</h2>
-          <p className="text-xs text-muted-foreground">正文生成会严格参考已批准的计划；修改计划字段后，生成正文时会保存为新草稿并要求重新批准。</p>
-          <Field label="标题" value={planTitle} onChange={setPlanTitle} />
-          <Field label="目标" value={planGoal} onChange={setPlanGoal} multiline rows={3} />
-          <Field label="冲突" value={planConflict} onChange={setPlanConflict} multiline rows={3} />
-          <Field label="情绪弧" value={planEmotion} onChange={setPlanEmotion} multiline rows={2} />
-          <Field label="章末钩子" value={planCliffhanger} onChange={setPlanCliffhanger} multiline rows={2} />
-          <h2 className="pt-2 font-medium">
-            场景计划
-            {payload?.plan?.target_word_count ? ` · 目标 ${payload.plan.target_word_count} 字` : ""}
-          </h2>
-          {(payload?.scenes || []).map((scene) => (
-            <div key={scene.id} className="rounded-md bg-muted/40 p-2 text-xs">
-              <div className="font-medium">
-                场景 {scene.scene_number} · {scene.location}
-                {scene.target_word_count ? ` · ${scene.target_word_min}-${scene.target_word_max} 字` : ""}
-              </div>
-              <p>{scene.goal}</p>
-            </div>
-          ))}
-          {!payload?.scenes?.length ? (
-            <p className="text-xs text-muted-foreground">尚无场景；生成本章时会自动创建。</p>
-          ) : null}
-        </aside>
-
-        <div className="flex min-w-0 flex-col gap-2">
-          <textarea
-            className="min-h-[420px] flex-1 rounded-lg border border-input bg-background p-3 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="在此撰写或粘贴章节正文。除非你点击「应用预览」，AI 不会覆盖此框内容。"
-          />
-          {preview ? (
-            <div className="rounded-lg border p-3">
-              <div className="mb-2 text-xs text-muted-foreground">{previewNote}</div>
-              <pre className="max-h-48 overflow-auto whitespace-pre-wrap text-sm">{preview}</pre>
-              <div className="mt-2 flex gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setDraft(preview);
-                    setPreview(null);
-                    setOk("预览已应用到编辑器。请保存以创建修订版本。");
-                  }}
-                >
-                  应用预览
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setPreview(null)}>
-                  丢弃
-                </Button>
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        <aside className="space-y-3 rounded-lg border p-3 text-sm">
-          <h2 className="font-medium">AlphaNovel 检查</h2>
-          <ul className="space-y-1.5 text-xs">
-            {platformChecks.map((item) => (
-              <li key={item.id}>
-                <span className={item.ok ? "text-foreground" : "text-muted-foreground"}>
-                  {item.ok ? "✓" : "○"} {item.label}
-                </span>
-                <div className="text-muted-foreground">{item.detail}</div>
-              </li>
-            ))}
-          </ul>
-          <h2 className="font-medium">角色</h2>
-          {characters.map((item) => (
-            <div key={item.id} className="text-xs">
-              <span className="font-medium">{item.name}</span> · {characterRoleLabel(item.role)}
-            </div>
-          ))}
-          {!characters.length ? (
-            <p className="text-xs text-muted-foreground">
-              暂无角色。{" "}
-              <Link
-                href={`/projects/${projectId}/characters`}
-                className={cn(buttonVariants({ variant: "link" }), "h-auto p-0 text-xs")}
-              >
-                去创建
-              </Link>
-            </p>
-          ) : null}
-          <h2 className="font-medium">相关记忆</h2>
-          {relevantMemory.map((item) => (
-            <p key={item.id} className="text-xs text-muted-foreground">
-              {item.content}
-            </p>
-          ))}
-          {!relevantMemory.length ? <p className="text-xs text-muted-foreground">暂无近章记忆。</p> : null}
-          <h2 className="font-medium">一致性</h2>
-          <p className="text-xs text-muted-foreground">{continuity || "在改稿工具里可运行一致性检查。"}</p>
-          <h2 className="font-medium">钩子</h2>
-          {hooks.map((item) => (
-            <p key={item.id} className="text-xs">
-              {item.description}
-            </p>
-          ))}
-          {!hooks.length ? <p className="text-xs text-muted-foreground">批准章节后沉淀钩子。</p> : null}
-        </aside>
-      </div>
-    </section>
-  );
+  if (loading) return <div className="flex min-h-dvh items-center justify-center text-sm text-slate-500">正在打开章节…</div>;
+  return <div className="flex h-dvh min-h-[620px] flex-col overflow-hidden bg-[var(--workspace-bg)] text-foreground"><header className="z-20 flex h-[72px] shrink-0 items-center justify-between border-b border-slate-200/80 bg-white/95 px-4 shadow-sm backdrop-blur md:px-6"><div className="flex min-w-0 items-center gap-3"><IconButton label="打开章节目录" onClick={() => setMobilePanel("directory")}><Menu className="size-5 lg:hidden" /><PanelLeftClose className="hidden size-4 lg:block" /></IconButton><Link href="/projects" className="hidden items-center gap-1 text-sm text-slate-500 hover:text-primary sm:flex"><ArrowLeft className="size-4" />作品库</Link><span className="text-slate-300">/</span><span className="truncate text-sm"><span className="text-slate-500">{projectTitle}</span><span className="mx-2 text-slate-300">/</span><strong>第 {number} 章写作</strong></span></div><div className="flex items-center gap-1.5 md:gap-3"><span className={cn("hidden items-center gap-1 text-xs sm:flex", candidateMode ? "text-primary" : saveError ? "text-rose-600" : dirty ? "text-amber-600" : "text-emerald-600")}>{candidateMode ? <Sparkles className="size-4" /> : saveError ? <AlertCircle className="size-4" /> : dirty ? <Clock3 className="size-4" /> : <CheckCircle2 className="size-4" />}{saveLabel}</span><IconButton label={focusMode ? "退出专注模式" : "进入专注模式"} onClick={() => setFocusMode((v) => !v)}><Focus className="size-5" /></IconButton>{generating ? <Button size="sm" variant="outline" onClick={stopGeneration}><span className="mr-1.5 size-2 rounded-sm bg-primary" />停止生成</Button> : <Button size="sm" disabled={!!busy || dirty || candidateMode} onClick={() => void run("生成本章", generate)}><Sparkles className="mr-1.5 size-4" />{busy === "生成本章" ? "生成中…" : "生成正文"}</Button>}<IconButton label="更多章节操作"><MoreHorizontal className="size-5" /></IconButton></div></header><StatusBanner loading={false} error={error} ok={ok} />
+    <div className={cn("grid min-h-0 flex-1", focusMode ? "grid-cols-1" : "lg:grid-cols-[220px_minmax(0,1fr)_320px]")}>
+      {!focusMode && <aside className="hidden min-h-0 flex-col border-r border-slate-200 bg-white lg:flex"><div className="border-b border-slate-100 p-4"><div className="flex items-center gap-3">{cover ? <img src={cover} alt="" className="size-14 rounded-lg object-cover" /> : <div className="flex size-14 items-center justify-center rounded-lg bg-primary/10 text-primary"><ImageIcon className="size-6" /></div>}<div className="min-w-0"><h1 className="truncate font-serif text-lg font-semibold">{projectTitle}</h1><p className="mt-1 text-xs text-slate-500">{chapters.length} 章 · {chapters.reduce((s, c) => s + (c.word_count || c.content?.length || 0), 0).toLocaleString()} 字</p></div></div></div><nav className="flex gap-1 border-b border-slate-100 px-3 py-3 text-xs"><Link href={`/projects/${projectId}`} className="rounded-lg px-2 py-2 text-slate-500">概览</Link><Link href={`/projects/${projectId}/story`} className="rounded-lg px-2 py-2 text-slate-500">策划</Link><span className="rounded-lg bg-primary/10 px-2 py-2 font-semibold text-primary">写作</span><Link href={`/projects/${projectId}/characters`} className="rounded-lg px-2 py-2 text-slate-500">资料</Link></nav><div className="min-h-0 flex-1 overflow-y-auto p-3"><div className="mb-2 flex items-center justify-between"><span className="text-xs font-semibold text-slate-500">章节目录</span><Link href={`/projects/${projectId}/chapters`} title="新建或管理章节" className="rounded-md p-1 text-primary hover:bg-primary/10"><Plus className="size-4" /></Link></div>{chapters.map((c) => <Link key={c.id} href={`/projects/${projectId}/chapters/${c.chapter_number}`} onClick={leave} className={cn("flex min-h-10 items-center gap-2 rounded-lg px-2 text-sm", c.chapter_number === number ? "bg-primary/10 font-semibold text-primary" : "text-slate-600 hover:bg-slate-50")}><span className={cn("flex size-7 shrink-0 items-center justify-center rounded-md text-xs", c.chapter_number === number ? "bg-white shadow-sm" : "bg-slate-100")}>{c.chapter_number}</span><span className="min-w-0 flex-1 truncate">{c.title || "未命名章节"}</span>{c.chapter_number === number && <MoreHorizontal className="size-4" />}</Link>)}</div><div className="border-t border-slate-100 p-3"><Link href={`/projects/${projectId}/chapters`} className="flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 text-sm font-medium text-primary"><Plus className="size-4" />新建章节</Link></div></aside>}
+      {!focusMode && mobilePanel === "directory" && <div className="fixed inset-0 z-40 bg-slate-950/20 lg:hidden" onClick={() => setMobilePanel(null)}><aside className="h-full w-[min(86vw,320px)] bg-white p-4" onClick={(e) => e.stopPropagation()}><div className="mb-4 flex justify-between"><strong>章节目录</strong><IconButton label="关闭章节目录" onClick={() => setMobilePanel(null)}><X className="size-5" /></IconButton></div>{chapters.map((c) => <Link key={c.id} href={`/projects/${projectId}/chapters/${c.chapter_number}`} onClick={leave} className={cn("block rounded-lg px-3 py-3 text-sm", c.chapter_number === number && "bg-primary/10 text-primary")}>第 {c.chapter_number} 章 · {c.title || "未命名章节"}</Link>)}</aside></div>}
+      <main ref={mainRef} onScroll={(e) => { const nearBottom = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 100; if (!nearBottom && candidateMode) { setFollowGeneration(false); setShowReturnToGeneration(true); } else if (nearBottom) { setFollowGeneration(true); setShowReturnToGeneration(false); } }} className="relative min-w-0 overflow-y-auto bg-white"><div className="sticky top-0 z-10 border-b border-slate-100 bg-white/95 px-4 py-3 backdrop-blur"><div className="mx-auto flex max-w-[860px] items-center justify-between"><div className="flex items-center gap-1 text-slate-500"><span className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm">正文 <ChevronDown className="ml-1 inline size-3.5" /></span><IconButton label="撤销" onClick={undo} disabled={!past.length || candidateMode}><Undo2 className="size-4" /></IconButton><IconButton label="重做" onClick={redo} disabled={!future.length || candidateMode}><Redo2 className="size-4" /></IconButton><IconButton label="列表工具暂不可用" disabled><List className="size-4" /></IconButton><IconButton label="代码工具暂不可用" disabled><Code2 className="size-4" /></IconButton></div><button type="button" onClick={() => void run("保存", save)} disabled={candidateMode} className="flex items-center gap-1 text-xs text-slate-500 hover:text-primary disabled:opacity-40"><Save className="size-4" />保存</button></div></div><div className="mx-auto max-w-[860px] px-5 pb-32 pt-10 md:px-12"><div className="sticky top-[57px] z-10 -mx-5 bg-white px-5 pb-4 md:-mx-12 md:px-12"><input aria-label="章节标题" value={planTitle} disabled={candidateMode} onChange={(e) => setPlanTitle(e.target.value)} className="w-full border-0 bg-transparent font-serif text-3xl font-semibold tracking-tight text-slate-950 outline-none disabled:opacity-90 md:text-4xl" /><p className="mb-8 mt-3 text-sm text-slate-400">{Array.from(draft).length.toLocaleString()} 字 · 计划状态：{approvalStatusLabel(payload?.plan?.status || "draft")}{candidateMode && <span className="ml-2 text-primary">· {generationLabel}</span>}</p></div><textarea ref={editorRef} aria-label="章节正文" readOnly={candidateMode} value={draft} onChange={(e) => { setDraft(e.target.value); draftVersion.current += 1; }} onSelect={selectText} placeholder="从这里开始写作…" className={cn("min-h-[calc(100dvh-240px)] w-full resize-none border-0 bg-transparent font-serif text-[18px] leading-[1.9] text-slate-800 outline-none placeholder:text-slate-300", candidateMode && "cursor-default selection:bg-primary/10")} />{candidateMode && <div className="sticky bottom-5 z-20 mx-auto mt-6 flex w-fit max-w-full flex-wrap items-center justify-center gap-3 rounded-2xl border border-primary/15 bg-white/95 px-4 py-3 shadow-xl backdrop-blur"><span className="flex items-center gap-2 text-sm text-slate-600"><span className={cn("size-2 rounded-full", generating ? "animate-pulse bg-primary" : generationStatus === "failed" ? "bg-rose-500" : "bg-emerald-500")} />{generating ? "AI 正在生成" : generationLabel} · 已生成 {Array.from(draft).length.toLocaleString()} 字</span>{generating ? <Button size="sm" variant="outline" onClick={stopGeneration}>停止生成</Button> : candidateText !== null ? <><Button size="sm" onClick={adoptGenerated}>采用候选稿</Button><Button size="sm" variant="outline" onClick={discardGenerated}>放弃候选稿</Button>{(generationStatus === "stopped" || generationStatus === "failed") && <Button size="sm" variant="ghost" onClick={() => void run("生成本章", generate)}>重试</Button>}</> : <><Button size="sm" onClick={() => void run("生成本章", generate)}>重试</Button><Button size="sm" variant="outline" onClick={discardGenerated}>放弃</Button></>}</div>}{showReturnToGeneration && candidateMode && <button type="button" onClick={() => { setFollowGeneration(true); setShowReturnToGeneration(false); const main = mainRef.current; if (main) main.scrollTo({ top: main.scrollHeight, behavior: "smooth" }); }} className="sticky bottom-24 z-20 mx-auto block rounded-full border border-primary/20 bg-white px-4 py-2 text-xs font-medium text-primary shadow-lg">回到生成位置</button>}{selection && !candidateMode && <div className="sticky bottom-5 z-20 mx-auto flex w-fit max-w-full items-center gap-1 rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl"><Wand2 className="mx-2 size-4 text-primary" />{REWRITE_OPS.map((op) => <button key={op.label} type="button" disabled={!!busy} onClick={() => void propose(op.instruction)} className="rounded-lg px-3 py-2 text-sm font-medium hover:bg-primary/10 hover:text-primary">{op.label}</button>)}<button type="button" onClick={() => setActiveTab("assistant")} className="rounded-lg px-3 py-2 text-sm font-medium hover:text-primary">自定义</button></div>}</div></main>
+      {!focusMode && <aside className="hidden min-h-0 flex-col border-l border-slate-200 bg-white lg:flex"><AssistantPanel activeTab={activeTab} setActiveTab={setActiveTab} payload={payload} planTitle={planTitle} planGoal={planGoal} planConflict={planConflict} planEmotion={planEmotion} planCliffhanger={planCliffhanger} setPlanTitle={setPlanTitle} setPlanGoal={setPlanGoal} setPlanConflict={setPlanConflict} setPlanEmotion={setPlanEmotion} setPlanCliffhanger={setPlanCliffhanger} generatePlan={() => void run("AI 生成章节计划", generatePlan)} context={() => void run("预览上下文", context)} contextPack={contextPack} setContextPack={setContextPack} characters={characters} memory={relevantMemory} hooks={hooks} checks={checks} pending={pending} auditStatus={auditStatus} auditStage={auditStage} versions={versions} repetition={repetitionCheck} relevance={relevanceCheck} continuity={continuity} review={() => void run("完成审查", review)} approve={() => void run("批准章节", approve)} manualReview={manualReview} approved={approved} selection={selection} instruction={selectionInstruction} setInstruction={setSelectionInstruction} candidate={selectionCandidate} note={selectionNote} propose={(instruction) => void propose(instruction || selectionInstruction)} clearCandidate={() => { setSelectionCandidate(null); setSelectionNote(null); }} adopt={adopt} busy={busy} /></aside>}
+    </div><div className="fixed bottom-4 right-4 z-30 flex gap-2 lg:hidden"><Button size="sm" variant="outline" onClick={() => setMobilePanel("assistant")}><Sparkles className="mr-1.5 size-4" />创作助手</Button></div>{!focusMode && mobilePanel === "assistant" && <div className="fixed inset-0 z-40 bg-slate-950/20 lg:hidden" onClick={() => setMobilePanel(null)}><aside className="absolute inset-y-0 right-0 w-[min(92vw,380px)] overflow-y-auto bg-white p-4 shadow-xl" onClick={(e) => e.stopPropagation()}><div className="mb-4 flex justify-between"><strong>创作助手</strong><IconButton label="关闭创作助手" onClick={() => setMobilePanel(null)}><X className="size-5" /></IconButton></div><AssistantPanel activeTab={activeTab} setActiveTab={setActiveTab} payload={payload} planTitle={planTitle} planGoal={planGoal} planConflict={planConflict} planEmotion={planEmotion} planCliffhanger={planCliffhanger} setPlanTitle={setPlanTitle} setPlanGoal={setPlanGoal} setPlanConflict={setPlanConflict} setPlanEmotion={setPlanEmotion} setPlanCliffhanger={setPlanCliffhanger} generatePlan={() => void run("AI 生成章节计划", generatePlan)} context={() => void run("预览上下文", context)} contextPack={contextPack} setContextPack={setContextPack} characters={characters} memory={relevantMemory} hooks={hooks} checks={checks} pending={pending} auditStatus={auditStatus} auditStage={auditStage} versions={versions} repetition={repetitionCheck} relevance={relevanceCheck} continuity={continuity} review={() => void run("完成审查", review)} approve={() => void run("批准章节", approve)} manualReview={manualReview} approved={approved} selection={selection} instruction={selectionInstruction} setInstruction={setSelectionInstruction} candidate={selectionCandidate} note={selectionNote} propose={(instruction) => void propose(instruction || selectionInstruction)} clearCandidate={() => { setSelectionCandidate(null); setSelectionNote(null); }} adopt={adopt} busy={busy} /></aside></div>}</div>;
 }
+
+function AssistantPanel(p: { activeTab: Tab; setActiveTab: (t: Tab) => void; payload: ChapterPayload | null; planTitle: string; planGoal: string; planConflict: string; planEmotion: string; planCliffhanger: string; setPlanTitle: (v: string) => void; setPlanGoal: (v: string) => void; setPlanConflict: (v: string) => void; setPlanEmotion: (v: string) => void; setPlanCliffhanger: (v: string) => void; generatePlan: () => void; context: () => void; contextPack: ContextPackPreview | null; setContextPack: (v: ContextPackPreview | null) => void; characters: Character[]; memory: MemoryItem[]; hooks: Hook[]; checks: ReturnType<typeof evaluateAlphaNovelChecks>; pending: number; auditStatus: string | null; auditStage: string | null; versions: Version[]; repetition: Repetition | null; relevance: Relevance | null; continuity: string | null; review: () => void; approve: () => void; manualReview: boolean; approved: boolean; selection: { start: number; end: number; text: string; version: number } | null; instruction: string; setInstruction: (v: string) => void; candidate: string | null; note: string | null; propose: (instruction?: string) => void; clearCandidate: () => void; adopt: () => void; busy: string | null }) {
+  return <div className="flex min-h-0 flex-1 flex-col"><div className="grid grid-cols-3 border-b border-slate-100 text-sm">{(["plan", "assistant", "checks"] as Tab[]).map((t) => <button key={t} type="button" onClick={() => p.setActiveTab(t)} className={cn("border-b-2 px-2 py-4", p.activeTab === t ? "border-primary font-semibold text-slate-900" : "border-transparent text-slate-500")}>{t === "plan" ? "计划" : t === "assistant" ? "AI 助手" : <>检查{p.pending ? <span className="ml-1 text-xs text-amber-600">{p.pending}</span> : null}</>}</button>)}</div><div className="min-h-0 flex-1 overflow-y-auto p-4">{p.activeTab === "plan" && <div className="space-y-4"><h2 className="font-serif text-xl font-semibold">章节计划</h2><p className="text-xs leading-5 text-slate-500">修改计划后，生成正文前会保存为新草稿并要求重新批准。</p><Field label="章节标题" value={p.planTitle} onChange={p.setPlanTitle} /><Field label="章节目标" value={p.planGoal} onChange={p.setPlanGoal} multiline rows={3} /><Field label="冲突" value={p.planConflict} onChange={p.setPlanConflict} multiline rows={3} /><Field label="情绪弧" value={p.planEmotion} onChange={p.setPlanEmotion} multiline /><Field label="章末钩子" value={p.planCliffhanger} onChange={p.setPlanCliffhanger} multiline /><div className="flex gap-2"><Button size="sm" onClick={p.generatePlan} disabled={!!p.busy}><Sparkles className="mr-1 size-4" />生成计划</Button><Button size="sm" variant="outline" onClick={p.context} disabled={!!p.busy}>上下文预览</Button></div>{p.payload?.scenes?.map((s) => <div key={s.id} className="rounded-lg bg-slate-50 p-3 text-xs leading-5"><strong>场景 {s.scene_number} · {s.location}</strong><p>{s.goal}</p><p className="text-slate-500">冲突：{s.conflict}</p></div>)}{p.contextPack && <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs"><div className="flex justify-between"><strong>上下文预览</strong><button type="button" onClick={() => p.setContextPack(null)}><X className="size-4" /></button></div><p className="mt-2">预计 {p.contextPack.memory_package.token_estimate} tokens · {p.contextPack.memory_package.dropped_for_budget ? `省略 ${p.contextPack.memory_package.dropped_for_budget} 项` : "未省略记忆"}</p></div>}</div>}{p.activeTab === "assistant" && <div className="space-y-4"><h2 className="font-serif text-xl font-semibold">AI 助手</h2>{p.selection ? <><div className="rounded-lg bg-slate-50 p-3 text-sm leading-6">“{p.selection.text}”</div><textarea value={p.instruction} onChange={(e) => p.setInstruction(e.target.value)} rows={3} placeholder="告诉 AI 你希望怎么改…" className="w-full rounded-lg border border-slate-200 p-3 text-sm outline-none focus:border-primary" /><div className="grid grid-cols-3 gap-2">{REWRITE_OPS.map((op) => <Button key={op.label} size="sm" variant="outline" disabled={!!p.busy} onClick={() => { p.setInstruction(op.instruction); p.propose(op.instruction); }}>{op.label}</Button>)}</div><Button className="w-full" size="sm" disabled={!!p.busy || !p.instruction.trim()} onClick={() => p.propose()}><Wand2 className="mr-1 size-4" />生成候选</Button>{p.note && <p className="text-xs text-slate-500">{p.note}</p>}{p.candidate !== null && <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3"><p className="whitespace-pre-wrap text-sm leading-6">{p.candidate}</p><div className="flex gap-2"><Button size="sm" className="flex-1" onClick={p.adopt}>采用修改</Button><Button size="sm" variant="outline" onClick={() => p.propose()}>重新生成</Button><Button size="sm" variant="ghost" onClick={p.clearCandidate}>取消</Button></div></div>}</> : <div className="rounded-lg border border-dashed border-slate-200 p-5 text-center text-sm text-slate-500"><Wand2 className="mx-auto mb-2 size-6 text-primary" />选中正文中的一段文字，开始局部修改。</div>}</div>}{p.activeTab === "checks" && <div className="space-y-4"><div className="flex items-center justify-between"><div><h2 className="font-serif text-xl font-semibold">本章检查</h2><p className="mt-1 text-xs text-slate-500">{p.pending ? `${p.pending} 项待处理` : "当前未发现待处理项"}</p></div><span className="rounded-full bg-amber-50 px-2 py-1 text-xs text-amber-700">{p.approved ? "已批准" : p.auditStatus || "待检查"}</span></div><div className="rounded-lg border border-slate-200 p-3 text-sm">{p.checks.map((c) => <div key={c.id} className="border-b border-slate-100 py-3 last:border-0"><p className={c.ok ? "text-emerald-700" : "text-amber-700"}>{c.ok ? "通过" : "有问题"} · {c.label}</p><p className="mt-1 text-xs text-slate-500">{c.detail}</p>{!c.ok && <p className="mt-1 text-xs text-slate-400">暂无可靠定位数据，不能跳转到正文任意位置。</p>}</div>)}</div>{p.repetition?.blocked && <Issue title="重复检查" detail={p.repetition.matches.map((m) => `第 ${m.chapter_number} 章：${m.reason}`).join("；")} />}{p.relevance?.blocked && <Issue title="计划相关性" detail={p.relevance.missing_requirements.join("；")} />}<div className="flex gap-2"><Button size="sm" variant="outline" onClick={p.review} disabled={!!p.busy || p.approved}>重新检查</Button>{p.manualReview && <Button size="sm" onClick={p.approve} disabled={!!p.busy || p.auditStatus !== "passed"}>批准章节</Button>}</div>{p.auditStage && <p className="text-xs text-slate-500">{p.auditStage}</p>}{p.versions.length > 0 && <div className="space-y-2"><h3 className="text-sm font-semibold">版本记录</h3>{p.versions.map((v) => <div key={v.version} className="rounded-lg border p-3 text-xs"><div className="flex justify-between"><strong>V{v.version}</strong><span>{v.selected ? "已选择" : v.accepted ? "候选" : "已淘汰"}</span></div><p className="mt-1 text-slate-500">{v.score === null ? "未评分" : `评分 ${v.score.toFixed(1)}`} · {v.word_count} 字</p></div>)}</div>}{p.continuity && <div className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600">{p.continuity}</div>}<div className="border-t border-slate-100 pt-3 text-xs text-slate-500"><p>角色 {p.characters.length} · 近章记忆 {p.memory.length} · 钩子 {p.hooks.length}</p>{p.characters.slice(0, 4).map((c) => <p key={c.id} className="mt-1">{c.name} · {characterRoleLabel(c.role)}</p>)}</div></div>}</div></div>;
+}
+function Issue({ title, detail }: { title: string; detail: string }) { return <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs"><p className="font-semibold text-amber-800">{title}</p><p className="mt-1 text-amber-700">{detail}</p><p className="mt-2 text-amber-600">暂无可靠段落定位数据，不能冒充定位。</p></div>; }

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from difflib import SequenceMatcher
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,6 +38,7 @@ from novel_engine.agents.contracts import (
     OutlineOutput,
     ReviseInput,
     MemoryAgentInput,
+    WriterInput,
 )
 from novel_engine.domain.errors import InvalidStateError
 from novel_engine.memory.service import MemoryService
@@ -57,6 +60,7 @@ from novel_engine.style.canon import scan_context_alignment
 from novel_engine.style.commercial import scan_commercial_quality
 from novel_engine.style.chapter_repetition import scan_book_repetition, scan_chapter_repetition
 from novel_engine.style.chapter_relevance import scan_chapter_relevance
+from novel_engine.style.word_count import count_text_units
 from novel_engine.style.signals import scan_continuity_signals
 from novel_engine.agents.contracts import ChapterPlannerInput, ContinuityInput, EditorInput, OutlineOutput, ReviseInput
 from novel_engine.workflows.context import character_to_agent, plot_to_outline, story_bible_to_architect
@@ -1002,6 +1006,107 @@ async def patch_chapter(
             )
         )
     return chapter
+
+
+def _sse_event(event: str, payload: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _clean_streamed_prose(value: str) -> str:
+    text_value = value.strip()
+    if text_value.startswith("```"):
+        text_value = text_value.removeprefix("```").removeprefix("json").removesuffix("```").strip()
+    if text_value.startswith("{"):
+        try:
+            parsed = json.loads(text_value)
+            if isinstance(parsed, dict) and isinstance(parsed.get("prose"), str):
+                return parsed["prose"].strip()
+        except json.JSONDecodeError:
+            pass
+    return text_value
+
+
+@router.post("/projects/{project_id}/chapters/{number}/generate/stream")
+async def generate_chapter_stream(
+    project_id: UUID,
+    number: int,
+    body: GenerateBody,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+    workflow: Annotated[AgentWorkflow, Depends(get_workflow)],
+    actor: Annotated[Actor, Depends(get_actor)],
+):
+    async def events():
+        try:
+            yield _sse_event("stage", {"stage": "preparing", "message": "正在整理章节上下文"})
+            context = await _writer_context(engine, project_id, number)
+            yield _sse_event("stage", {"stage": "streaming", "message": "正在生成正文"})
+            chunks: list[str] = []
+            async for delta in workflow.writer.stream_prose(
+                WriterInput(context=context, human_notes=body.human_notes)
+            ):
+                chunks.append(delta)
+                yield _sse_event("delta", {"text": delta})
+            prose = _clean_streamed_prose("".join(chunks))
+            if not prose:
+                raise InvalidStateError("AI 没有返回有效正文")
+            yield _sse_event("stage", {"stage": "finalizing", "message": "正文已生成，正在保存候选版本"})
+            repetition = scan_chapter_repetition(
+                chapter_number=number,
+                content=prose,
+                chapters=await engine.chapters.list(project_id),
+            )
+            plan = await engine.uow.chapter_plans.latest_for_chapter(
+                (await engine.chapters.get_by_number(project_id, number)).id
+            )
+            scenes = await engine.scene_plans.list(plan.id) if plan else []
+            relevance = scan_chapter_relevance(content=prose, plan=plan, scenes=scenes) if plan else None
+            pipeline = await _pipeline(engine, workflow, project_id)
+            if body.persist:
+                await pipeline.persist_revision(
+                    project_id,
+                    number,
+                    prose,
+                    created_by=actor.id,
+                    change_summary="writer-agent streamed candidate",
+                )
+                chapter_row = await engine.chapters.get_by_number(project_id, number)
+                metadata = dict(chapter_row.extra_metadata or {})
+                metadata["audit"] = {
+                    **(metadata.get("audit") or {}),
+                    "status": "streamed",
+                    "versions": [{
+                        "version": 1,
+                        "prose": prose,
+                        "word_count": count_text_units(prose),
+                        "score": None,
+                        "selected": True,
+                        "accepted": True,
+                    }],
+                    "content_fingerprint": _content_fingerprint(chapter_row.content),
+                }
+                await engine.chapters.update(chapter_row.model_copy(update={"extra_metadata": metadata}))
+                await save_project_snapshot(engine, project_id)
+            repetition_payload = repetition.model_dump(mode="json")
+            relevance_payload = relevance.model_dump(mode="json") if relevance else {"status": "missing_plan", "blocked": True}
+            yield _sse_event("done", {
+                "writer": {"title": context.chapter_plan.chapter_title, "prose": prose, "word_count": count_text_units(prose)},
+                "editor": {"overall_notes": "流式正文已生成，等待独立审查"},
+                "continuity": {"overall": "pending"},
+                "review_status": "streaming_complete",
+                "versions": [{"version": 1, "prose": prose, "word_count": count_text_units(prose), "score": None, "selected": True, "accepted": True}],
+                "length_warning": None,
+                "repetition_check": repetition_payload,
+                "relevance_check": relevance_payload,
+                "auto_approved": False,
+            })
+        except Exception as exc:
+            yield _sse_event("error", {"message": str(exc)})
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/projects/{project_id}/chapters/{number}/review")

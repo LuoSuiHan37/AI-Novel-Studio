@@ -15,12 +15,12 @@ from novel_engine.providers.errors import (
 
 def raise_for_status(response: httpx.Response, *, provider: str) -> None:
     status = response.status_code
-    body = _safe_body(response)
     if status in {401, 403}:
         raise ProviderAuthError(f"{provider} authentication failed (HTTP {status})")
     if status == 429:
         raise ProviderRateLimitError(f"{provider} rate limited (HTTP 429)")
     if status >= 400:
+        body = _safe_body(response)
         raise ProviderRequestError(
             f"{provider} request failed (HTTP {status}): {body[:500]}"
         )
