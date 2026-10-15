@@ -19,6 +19,7 @@ from novel_engine.agents.contracts import (
     StoryArchitectInput,
     WorldAgentInput,
     WriterInput,
+    ProjectReviewInput,
 )
 from novel_engine.domain.errors import InvalidStateError
 from novel_engine.style.word_count import count_text_units
@@ -31,6 +32,7 @@ from novel_engine.agents.revise import ReviseAgent
 from novel_engine.agents.story_architect import StoryArchitectAgent
 from novel_engine.agents.world import WorldAgent
 from novel_engine.agents.writer import WriterAgent
+from novel_engine.agents.project_review import ProjectReviewAgent
 from novel_engine.providers.base import LLMProvider
 
 
@@ -70,6 +72,7 @@ class AgentWorkflow:
         self.memory = MemoryAgent(provider)
         self.hook = HookAgent(provider)
         self.chapter_summary = ChapterSummaryAgent(provider)
+        self.project_review = ProjectReviewAgent(provider)
 
     async def propose_idea(self, payload: IdeaInput):
         return await self.idea.run(payload)
@@ -91,6 +94,9 @@ class AgentWorkflow:
 
     async def review_commercial(self, payload: CommercialReviewInput):
         return await self.commercial.run(payload)
+
+    async def review_project(self, payload: ProjectReviewInput):
+        return await self.project_review.run(payload)
 
     async def draft_chapter_pass(self, payload: WriterInput) -> ChapterPassBundle:
         written = await self.writer.run(payload)

@@ -25,6 +25,7 @@ from app.api.deps import (
 )
 from app.api.schemas import ChapterPatch, ChapterPlanCreate, ChapterPlanSuggest, ConfirmBody, GenerateBody, ProposeEditBody
 from app.services.book_snapshot import save_project_snapshot
+from app.services.prompt_optimization import chapter_optimization_signals
 from app.db.models.chapter import ChapterSummary
 from app.db.models.memory import StoryMemory, TimelineEvent
 from app.db.models.continuity import ContinuityIssue
@@ -794,6 +795,16 @@ async def generate_chapter(
             or commercial.rhythm_score < 6
             or commercial.ai_style_risk_score < 5
         )
+        optimization_signals = chapter_optimization_signals(
+            chapter_number=number,
+            audit={
+                "length_check": length_check,
+                "repetition_check": result.repetition_check,
+                "relevance_check": result.relevance_check,
+            },
+            editor=result.bundle.editor.output,
+            commercial=commercial.model_dump(mode="json") if commercial else None,
+        )
         metadata["audit"] = {
             "status": (
                 "completed_with_errors"
@@ -810,8 +821,22 @@ async def generate_chapter(
             "independent_commercial": commercial.model_dump() if commercial else None,
             "content_fingerprint": _content_fingerprint(chapter_row.content),
             "length_check": length_check,
+            "optimization_signals": optimization_signals,
         }
         await engine.chapters.update(chapter_row.model_copy(update={"extra_metadata": metadata}))
+        if review_workflow is not None or optimization_signals:
+            quality_reviews = list((project.extra_metadata or {}).get("quality_reviews") or [])
+            quality_reviews.append({
+                "review_type": "chapter_independent",
+                "chapter_number": number,
+                "status": metadata["audit"]["status"],
+                "independent_commercial": commercial.model_dump() if commercial else None,
+                "independent_review": getattr(review_workflow, "provider_identity", None),
+                "optimization_signals": optimization_signals,
+            })
+            await engine.update_project(project.model_copy(update={
+                "extra_metadata": {**(project.extra_metadata or {}), "quality_reviews": quality_reviews[-50:]}
+            }))
         await save_project_snapshot(engine, project_id)
     auto_approved = False
     if (

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BookOpen, ChevronDown, FileText, FolderOpen, House, List, PencilLine, Sparkles, Users, X } from "lucide-react";
+import { BookOpen, ChevronDown, FileText, FolderOpen, House, List, PencilLine, ShieldCheck, Sparkles, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { displayProjectTitle, projectCoverUrl } from "@/lib/project-display";
 import type { Project } from "@/lib/types";
@@ -28,6 +28,7 @@ export function ProjectSidebar({ projectId, project, pathname, mobile, onClose }
       <NavItem href={`${base}/story`} label="小说介绍" pathname={pathname} icon={FileText} onClose={onClose} />
       <NavItem href={`${base}/characters`} label="策划" pathname={pathname} icon={PencilLine} onClose={onClose} />
       <NavItem href={`${base}/chapters`} label="章节目录" pathname={pathname} icon={List} onClose={onClose} />
+      <NavItem href={`${base}/quality`} label="独立审核" pathname={pathname} icon={ShieldCheck} onClose={onClose} />
     </div><div className="mt-5 border-t border-[#eef2f7] pt-4"><div className="flex items-center justify-between px-3 pb-2 text-[11px] font-semibold tracking-[.12em] text-[#9aa6b8]"><span>资料库</span><ChevronDown className="size-3.5" /></div><div className="space-y-1"><NavItem href={`${base}/bible`} label="书级创作内核" pathname={pathname} icon={BookOpen} onClose={onClose} /><NavItem href={`${base}/characters`} label="角色" pathname={pathname} icon={Users} onClose={onClose} /><NavItem href={`${base}/world`} label="世界观" pathname={pathname} icon={FolderOpen} onClose={onClose} /><NavItem href={`${base}/hooks`} label="钩子 / 伏笔" pathname={pathname} icon={Sparkles} onClose={onClose} /></div></div></nav>
   </aside>;
 }

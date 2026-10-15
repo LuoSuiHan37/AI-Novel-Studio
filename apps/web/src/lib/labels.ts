@@ -9,6 +9,17 @@ const PROJECT_STATUS: Record<string, string> = {
   archived: "已归档",
 };
 
+const PLATFORM: Record<string, string> = {
+  fanqie: "番茄",
+  qidian: "起点",
+  qimao: "七猫",
+  zongheng: "纵横",
+  shuqi: "书旗",
+  alphanovel: "AlphaNovel",
+  wattpad: "Wattpad",
+  goodnovel: "GoodNovel",
+};
+
 const PIPELINE_STAGE: Record<string, string> = {
   idea: "创意",
   story_bible: "故事圣经",
@@ -140,6 +151,10 @@ function label(map: Record<string, string>, value: string | null | undefined): s
 
 export function projectStatusLabel(value: string): string {
   return label(PROJECT_STATUS, value);
+}
+
+export function platformLabel(value: string | null | undefined): string {
+  return label(PLATFORM, value);
 }
 
 export function pipelineStageLabel(value: string): string {

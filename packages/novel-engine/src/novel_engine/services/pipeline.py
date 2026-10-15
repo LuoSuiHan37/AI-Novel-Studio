@@ -57,6 +57,11 @@ class PipelineService:
         if target is PipelineStage.CHAPTER_PLAN:
             return
         if target is PipelineStage.DRAFTING:
+            review_status = (project.extra_metadata or {}).get("project_review_status")
+            if (project.extra_metadata or {}).get("project_review_required") and review_status != "ready":
+                raise InvalidStateError(
+                    "independent project review must pass before chapter generation"
+                )
             return
         if target is PipelineStage.REVIEW:
             chapters = await self._uow.chapters.list_by_project(project.id)

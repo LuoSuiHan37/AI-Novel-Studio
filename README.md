@@ -11,6 +11,7 @@ AI + Human 协作的英文长篇网文生产系统，面向 AlphaNovel、Wattpad
 已完成：
 
 - 章节流水线：Load → Bible/Arc/Plan → Memory Retrieval → ContextPackage → Writer/Editor/Continuity → 重复/相关性/长度闸门 → 修订建议（ERROR 不覆盖原稿）→ Revision → 自动审核批准 → Summary/Memory/CharacterState/Timeline/Hooks/Foreshadowing
+- 独立审核双闸门：小说进入正文生产前的 Project Review，以及正文生成后的 Chapter Review；结果和 Prompt 版本记录在作品质量中心
 - NovelPreset / PlatformPreset（AlphaNovel 规则在 YAML，不写死核心引擎）
 - Anti-repetition 按频率与近窗判断，不是永久禁词
 - 连续 5 章脚本化测试（状态、世界规则、时间线、Hooks、检索、Revision、人工修改不被覆盖）
@@ -143,4 +144,6 @@ OPENAI_API_KEY=...
 
 第二审查模型只负责独立检查，不负责改写正文。任一审查模型报告 `ERROR` 时，章节不会自动进入
 `reviewed` 状态；异常短的修订稿也不会覆盖原始草稿。
+
+新建作品必须先在作品侧边栏的“独立审核”中完成 Project Review；只有审核结果允许进入正文生产时，流水线才会进入 `drafting`。章节生成时的独立审核沿用同一审查模型配置，并将章节审核摘要写入作品质量记录。
 # AI-Novel-Studio

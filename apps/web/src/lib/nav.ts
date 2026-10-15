@@ -26,6 +26,7 @@ export function getProjectPrimaryNav(projectId: string): NavItem[] {
   return [
     { href: `${base}/write`, label: "去写小说" },
     { href: `${base}/research`, label: "爆款研究" },
+    { href: `${base}/quality`, label: "独立审核" },
     { href: base, label: "概览" },
   ];
 }

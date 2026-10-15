@@ -5,9 +5,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
 
-from app.api.deps import Actor, confirmed_by, get_actor, get_engine, get_workflow
+from app.api.deps import Actor, confirmed_by, get_actor, get_engine, get_review_workflow, get_workflow
 from app.api.schemas import ActorOut, ConfirmBody, ProjectCreate, ProjectTitleSuggest, ProjectUpdate
 from app.services.book_snapshot import save_project_snapshot
+from app.services.prompt_optimization import optimization_report
 from novel_engine.agents.contracts import IdeaInput
 from novel_engine.creative.profile import compile_creative_profile
 from novel_engine.domain.errors import InvalidStateError, NotFoundError
@@ -15,9 +16,34 @@ from novel_engine.models.entities import StoryBible
 from novel_engine.models.enums import ProjectStatus
 from novel_engine.services.engine import NovelEngine
 from novel_engine.workflows.agent_workflow import AgentWorkflow
+from novel_engine.agents.contracts import ProjectReviewInput
 from novel_engine.models.entities import NovelProject
 
 router = APIRouter(tags=["projects"])
+
+
+async def _project_review_snapshot(engine: NovelEngine, project_id: UUID) -> dict:
+    project = await engine.get_project(project_id)
+    story = await engine.story_bibles.get(project_id)
+    world = await engine.world_bibles.get(project_id)
+    characters = await engine.characters.list(project_id)
+    plots = await engine.master_plots.list(project_id)
+    arcs = await engine.story_arcs.list(project_id)
+    chapters = await engine.chapters.list(project_id)
+    plans = []
+    for chapter in chapters:
+        plan = await engine.uow.chapter_plans.latest_for_chapter(chapter.id)
+        if plan is not None:
+            plans.append(plan.model_dump(mode="json"))
+    return {
+        "project": project.model_dump(mode="json"),
+        "story_bible": story.model_dump(mode="json") if story else None,
+        "world_bible": world.model_dump(mode="json") if world else None,
+        "characters": [item.model_dump(mode="json") for item in characters],
+        "master_plots": [item.model_dump(mode="json") for item in plots],
+        "story_arcs": [item.model_dump(mode="json") for item in arcs],
+        "chapter_plans": plans,
+    }
 
 
 def _normalize_target_platform(language: str | None, platform: str | None) -> str | None:
@@ -154,7 +180,8 @@ async def create_project(
                 "novel_contract": {
                     "planned_chapter_count": body.chapter_count_target,
                     "status": "draft",
-                }
+                },
+                "project_review_required": True,
             },
         )
     )
@@ -190,6 +217,63 @@ async def get_project(
     return await engine.get_project(project_id)
 
 
+@router.get("/projects/{project_id}/reviews")
+async def list_project_reviews(
+    project_id: UUID,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+) -> list[dict]:
+    project = await engine.get_project(project_id)
+    return list((project.extra_metadata or {}).get("quality_reviews") or [])
+
+
+@router.get("/projects/{project_id}/reviews/optimization")
+async def project_prompt_optimization(
+    project_id: UUID,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+) -> dict:
+    project = await engine.get_project(project_id)
+    return optimization_report((project.extra_metadata or {}).get("quality_reviews") or [])
+
+
+@router.post("/projects/{project_id}/reviews/project")
+async def review_project_readiness(
+    project_id: UUID,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+    review_workflow: Annotated[AgentWorkflow | None, Depends(get_review_workflow)],
+) -> dict:
+    if review_workflow is None:
+        raise InvalidStateError("请先配置独立审查模型，且不能与生成模型相同")
+    snapshot = await _project_review_snapshot(engine, project_id)
+    result = await review_workflow.review_project(ProjectReviewInput(project_snapshot=snapshot))
+    project = await engine.get_project(project_id)
+    review = {
+        "review_type": "project_independent",
+        "overall": result.output.overall,
+        "score": result.output.score,
+        "findings": [item.model_dump(mode="json") for item in result.output.findings],
+        "can_start_chapter_generation": result.output.can_start_chapter_generation,
+        "missing_requirements": result.output.missing_requirements,
+        "overall_notes": result.output.overall_notes,
+        "prompt_id": result.prompt_id,
+        "prompt_version": result.prompt_version,
+        "model": review_workflow.provider_identity,
+    }
+    metadata = dict(project.extra_metadata or {})
+    reviews = list(metadata.get("quality_reviews") or [])
+    reviews.append(review)
+    metadata["quality_reviews"] = reviews[-20:]
+    metadata["project_review"] = review
+    if result.output.overall == "BLOCKED":
+        metadata["project_review_status"] = "blocked"
+    elif result.output.can_start_chapter_generation:
+        metadata["project_review_status"] = "ready"
+    else:
+        metadata["project_review_status"] = "needs_attention"
+    saved = await engine.update_project(project.model_copy(update={"extra_metadata": metadata}))
+    await save_project_snapshot(engine, project_id)
+    return {"review": review, "project": saved}
+
+
 @router.patch("/projects/{project_id}")
 async def patch_project(
     project_id: UUID,
@@ -218,6 +302,11 @@ async def patch_project(
                 "status": "draft",
             },
         }
+    if any(key in updates for key in ("title", "genre", "tropes", "language", "target_platform", "premise", "theme", "tone", "logline", "synopsis", "creative_profile")):
+        metadata = dict(updates.get("extra_metadata") or current.extra_metadata or {})
+        if metadata.get("project_review_required"):
+            metadata["project_review_status"] = "needs_attention"
+        updates["extra_metadata"] = metadata
     project = await engine.update_project(current.model_copy(update=updates))
     if body.premise and body.theme:
         await engine.story_bibles.upsert(

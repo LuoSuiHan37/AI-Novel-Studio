@@ -298,6 +298,28 @@ class CommercialReviewOutput(AgentModel):
     repair_priorities: list[str] = Field(default_factory=list)
 
 
+class ProjectReviewInput(AgentModel):
+    project_snapshot: dict
+
+
+class ProjectReviewFinding(AgentModel):
+    severity: str
+    category: str
+    location: str
+    problem: str
+    why_it_matters: str
+    recommendation: str
+
+
+class ProjectReviewOutput(AgentModel):
+    overall: str
+    score: int = Field(ge=1, le=10)
+    findings: list[ProjectReviewFinding] = Field(default_factory=list)
+    can_start_chapter_generation: bool
+    missing_requirements: list[str] = Field(default_factory=list)
+    overall_notes: str = ""
+
+
 class ContinuityInput(AgentModel):
     context: WriterContext
     prose: str
