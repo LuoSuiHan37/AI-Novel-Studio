@@ -1,6 +1,7 @@
 "use client";
 
-import { Menu } from "lucide-react";
+import Link from "next/link";
+import { BookOpen, House, Menu, Search, Settings2, X } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ProjectSidebar } from "@/components/project-sidebar";
@@ -9,18 +10,15 @@ import { api } from "@/lib/api";
 import type { Project } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+function GlobalSidebar({ pathname, mobile, onClose }: { pathname: string; mobile?: boolean; onClose?: () => void }) {
+  const items = [["/", "工作台", House], ["/", "作品库", BookOpen], ["/research", "参考研究", Search]] as const;
+  return <aside className={cn("flex h-full w-[220px] flex-col border-r border-[#e4eaf3] bg-white text-[#14213d]", mobile && "shadow-2xl")}><div className="flex h-[72px] shrink-0 items-center justify-between border-b border-[#eef2f7] px-5"><Link href="/" onClick={onClose} className="flex items-center gap-2.5"><span className="flex size-8 items-center justify-center rounded-[9px] bg-[#2563eb] text-white"><BookOpen className="size-[19px]" /></span><span className="text-[16px] font-semibold tracking-[-.02em]">AI 小说工作室</span></Link>{mobile ? <button type="button" aria-label="关闭导航" onClick={onClose} className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"><X className="size-5" /></button> : null}</div><nav aria-label="工作台导航" className="flex-1 px-3 py-5"><div className="space-y-1">{items.map(([href, label, Icon], index) => { const active = index === 0 ? pathname === "/" : index === 1 ? pathname === "/projects" || pathname.startsWith("/projects/") : pathname.startsWith(href); return <Link key={label} href={href} onClick={onClose} className={cn("flex min-h-11 items-center gap-3 rounded-[10px] px-3.5 text-[14px] font-medium", active ? "bg-[#edf3ff] text-[#2563eb]" : "text-[#42516b] hover:bg-[#f4f7fb]")}>{<Icon className="size-[18px]" strokeWidth={1.8} />}{label}</Link>; })}</div></nav><div className="border-t border-[#eef2f7] p-3"><Link href="/settings" onClick={onClose} className={cn("flex min-h-11 items-center gap-3 rounded-[10px] px-3.5 text-[14px] font-medium", pathname === "/settings" ? "bg-[#edf3ff] text-[#2563eb]" : "text-[#42516b] hover:bg-[#f4f7fb]")}><Settings2 className="size-[18px]" strokeWidth={1.8} />AI 设置</Link></div></aside>;
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-  const projectId = extractProjectId(pathname);
-  const isChapterEditor = /^\/projects\/[^/]+\/chapters\/[^/]+$/.test(pathname);
-  const [project, setProject] = useState<Project | null>(null);
-  const [mobileOpen, setMobileOpen] = useState(false);
-
-  useEffect(() => {
-    if (!projectId) return;
-    api<Project>(`/projects/${projectId}`).then(setProject).catch(() => setProject(null));
-  }, [projectId, pathname]);
-
-  if (isChapterEditor || !projectId) return <div className="min-h-dvh bg-[var(--workspace-bg)] text-foreground"><main className="min-h-dvh min-w-0 px-4 py-16 sm:px-6 md:px-8 md:py-10 xl:px-12">{children}</main></div>;
+  const pathname = usePathname(); const projectId = extractProjectId(pathname); const isChapterEditor = /^\/projects\/[^/]+\/chapters\/[^/]+$/.test(pathname); const [project, setProject] = useState<Project | null>(null); const [mobileOpen, setMobileOpen] = useState(false);
+  useEffect(() => { if (!projectId) return; api<Project>(`/projects/${projectId}`).then(setProject).catch(() => setProject(null)); }, [projectId, pathname]);
+  if (isChapterEditor) return <div className="min-h-dvh bg-[var(--workspace-bg)] text-foreground"><main className="min-h-dvh min-w-0 px-4 py-16 sm:px-6 md:px-8 md:py-10 xl:px-12">{children}</main></div>;
+  if (!projectId) return <div className="min-h-dvh bg-[var(--workspace-bg)] text-foreground"><button type="button" aria-label="打开导航" className="fixed left-4 top-4 z-50 flex size-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm md:hidden" onClick={() => setMobileOpen(true)}><Menu className="size-5" /></button><div className={cn("fixed inset-0 z-40 bg-slate-950/20 transition-opacity md:hidden", mobileOpen ? "opacity-100" : "pointer-events-none opacity-0")} onClick={() => setMobileOpen(false)} aria-hidden="true" /><div className={cn("fixed inset-y-0 left-0 z-50 transition-transform duration-200 md:hidden", mobileOpen ? "translate-x-0" : "-translate-x-full")}><GlobalSidebar pathname={pathname} mobile onClose={() => setMobileOpen(false)} /></div><div className="fixed inset-y-0 left-0 z-30 hidden md:block"><GlobalSidebar pathname={pathname} /></div><main className="min-h-dvh min-w-0 px-4 py-16 sm:px-6 md:ml-[220px] md:px-8 md:py-0 xl:px-10">{children}</main></div>;
   return <div className="min-h-dvh bg-[var(--workspace-bg)] text-foreground"><button type="button" aria-label="打开导航" className="fixed left-4 top-4 z-50 flex size-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm md:hidden" onClick={() => setMobileOpen(true)}><Menu className="size-5" /></button><div className={cn("fixed inset-0 z-40 bg-slate-950/20 transition-opacity md:hidden", mobileOpen ? "opacity-100" : "pointer-events-none opacity-0")} onClick={() => setMobileOpen(false)} aria-hidden="true" /><div className={cn("fixed inset-y-0 left-0 z-50 transition-transform duration-200 md:hidden", mobileOpen ? "translate-x-0" : "-translate-x-full")}><ProjectSidebar projectId={projectId} project={project} pathname={pathname} mobile onClose={() => setMobileOpen(false)} /></div><div className="fixed inset-y-0 left-0 z-30 hidden md:block"><ProjectSidebar projectId={projectId} project={project} pathname={pathname} /></div><main className="min-h-dvh min-w-0 px-4 py-16 sm:px-6 md:ml-[220px] md:px-8 md:py-0 xl:px-10">{children}</main></div>;
 }

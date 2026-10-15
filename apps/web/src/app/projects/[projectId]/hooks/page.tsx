@@ -1,57 +1,40 @@
 "use client";
 
-import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { BookOpen, Check, ChevronDown, ChevronRight, CircleHelp, FileText, Filter, Search, Sparkles, Target, XCircle } from "lucide-react";
 
-import { StatusBanner } from "@/components/ui-bits";
 import { api, ApiError } from "@/lib/api";
-import { foreshadowStatusLabel, hookStatusLabel, hookTypeLabel } from "@/lib/labels";
-import type { Foreshadowing, Hook } from "@/lib/types";
+import { hookStatusLabel, hookTypeLabel, foreshadowStatusLabel } from "@/lib/labels";
+import type { Chapter, Foreshadowing, Hook, Project } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+type Tab = "hooks" | "foreshadowing";
+type StatusFilter = "all" | string;
+type RecordItem = { kind: Tab; id: string; title: string; description: string; status: string; type: string | null; sourceId: string | null; resolvedId: string | null; expectedId: string | null; actualId: string | null; clueText: string | null; importance: string | null };
+const inputClass = "h-10 rounded-[8px] border border-[#d5dfed] bg-white px-3 text-sm text-[#1d2b49] outline-none transition placeholder:text-[#a4afbf] focus:border-[#7da3f5] focus:ring-3 focus:ring-[#2563eb]/10";
+
+function Panel({ children, className }: { children: React.ReactNode; className?: string }) { return <section className={cn("rounded-[12px] border border-[#e1e8f2] bg-white shadow-[0_8px_24px_rgba(35,55,95,.045)]", className)}>{children}</section>; }
+function statusText(item: RecordItem) { return item.kind === "hooks" ? hookStatusLabel(item.status) : foreshadowStatusLabel(item.status); }
+function titleFrom(description: string) { const clean = description.trim().replace(/\s+/g, " "); if (!clean) return "未命名记录"; const first = clean.split(/[。！？!?；;]/)[0] || clean; return first.length > 28 ? `${first.slice(0, 28)}…` : first; }
+function chapterLabel(id: string | null, chapters: Chapter[]) { if (!id) return null; const chapter = chapters.find((item) => item.id === id); return chapter ? `第 ${chapter.chapter_number} 章 · ${chapter.title || "未命名章节"}` : "来源章节已不存在"; }
+function StatusPill({ item }: { item: RecordItem }) { const tone = item.status === "resolved" || item.status === "paid_off" ? "bg-[#eaf9f2] text-[#16855f]" : item.status === "dropped" || item.status === "missed" ? "bg-[#f1f4f8] text-[#718099]" : item.status === "planted" ? "bg-[#edf3ff] text-[#2563eb]" : "bg-[#fff4df] text-[#b36a00]"; return <span className={cn("rounded-full px-2.5 py-1 text-xs font-semibold", tone)}>{statusText(item)}</span>; }
+function StatCard({ icon: Icon, label, value, tone = "blue" }: { icon: typeof Target; label: string; value: number; tone?: "blue" | "green" | "slate" }) { return <div className="flex items-center gap-4 rounded-[10px] border border-[#e4eaf3] bg-white px-5 py-4 shadow-[0_5px_18px_rgba(35,55,95,.04)]"><span className={cn("flex size-11 shrink-0 items-center justify-center rounded-full", tone === "green" ? "bg-[#eaf9f2] text-[#16855f]" : tone === "slate" ? "bg-[#f1f4f8] text-[#25365a]" : "bg-[#edf3ff] text-[#2563eb]")}><Icon className="size-5" /></span><div><p className="text-sm text-[#718099]">{label}</p><strong className="mt-1 block text-[26px] leading-none text-[#172443]">{value}</strong></div></div>; }
 
 export default function HooksPage() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const [hooks, setHooks] = useState<Hook[]>([]);
-  const [items, setItems] = useState<Foreshadowing[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    Promise.all([
-      api<Hook[]>(`/projects/${projectId}/hooks`),
-      api<Foreshadowing[]>(`/projects/${projectId}/foreshadowing`),
-    ])
-      .then(([hookList, foreshadow]) => {
-        setHooks(hookList);
-        setItems(foreshadow);
-      })
-      .catch((err: ApiError) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [projectId]);
-
-  return (
-    <section className="grid gap-6 md:grid-cols-2">
-      <div className="space-y-3">
-        <h1 className="text-2xl font-semibold">钩子</h1>
-        <p className="text-sm text-muted-foreground">资料库审计 · 写作时见章节侧栏。</p>
-        <StatusBanner loading={loading} error={error} />
-        {hooks.map((item) => (
-          <article key={item.id} className="rounded-lg border p-3 text-sm">
-            <div className="text-xs text-muted-foreground">
-              {hookTypeLabel(item.hook_type)} · {hookStatusLabel(item.status)}
-            </div>
-            {item.description}
-          </article>
-        ))}
-      </div>
-      <div className="space-y-3">
-        <h2 className="text-xl font-semibold">伏笔</h2>
-        {items.map((item) => (
-          <article key={item.id} className="rounded-lg border p-3 text-sm">
-            <div className="text-xs text-muted-foreground">{foreshadowStatusLabel(item.status)}</div>
-            {item.description}
-          </article>
-        ))}
-      </div>
-    </section>
-  );
+  const { projectId } = useParams<{ projectId: string }>(); const router = useRouter();
+  const [project, setProject] = useState<Project | null>(null); const [hooks, setHooks] = useState<Hook[]>([]); const [foreshadowings, setForeshadowings] = useState<Foreshadowing[]>([]); const [chapters, setChapters] = useState<Chapter[]>([]); const [tab, setTab] = useState<Tab>("hooks"); const [selectedId, setSelectedId] = useState<string | null>(null); const [query, setQuery] = useState(""); const [statusFilter, setStatusFilter] = useState<StatusFilter>("all"); const [typeFilter, setTypeFilter] = useState<StatusFilter>("all"); const [loading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null);
+  useEffect(() => { let active = true; Promise.all([api<Project>(`/projects/${projectId}`), api<Hook[]>(`/projects/${projectId}/hooks`), api<Foreshadowing[]>(`/projects/${projectId}/foreshadowing`), api<Chapter[]>(`/projects/${projectId}/chapters`).catch(() => [])]).then(([loadedProject, loadedHooks, loadedForeshadowings, loadedChapters]) => { if (!active) return; setProject(loadedProject); setHooks(loadedHooks); setForeshadowings(loadedForeshadowings); setChapters(loadedChapters); setSelectedId(loadedHooks[0]?.id || loadedForeshadowings[0]?.id || null); }).catch((err: unknown) => { if (active) setError(err instanceof ApiError ? err.message : "钩子与伏笔加载失败，请重试"); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, [projectId]);
+  const allItems = useMemo<RecordItem[]>(() => [...hooks.map((item) => ({ kind: "hooks" as const, id: item.id, title: titleFrom(item.description), description: item.description, status: item.status, type: item.hook_type, sourceId: item.setup_chapter_id || null, resolvedId: item.resolved_chapter_id || null, expectedId: null, actualId: null, clueText: null, importance: item.importance })), ...foreshadowings.map((item) => ({ kind: "foreshadowing" as const, id: item.id, title: titleFrom(item.description), description: item.description, status: item.status, type: null, sourceId: item.setup_chapter_id || null, resolvedId: null, expectedId: item.expected_payoff_chapter_id || null, actualId: item.actual_payoff_chapter_id || null, clueText: item.clue_text, importance: null }))], [hooks, foreshadowings]);
+  const tabItems = useMemo(() => allItems.filter((item) => item.kind === tab), [allItems, tab]);
+  const statusOptions = useMemo(() => Array.from(new Set(tabItems.map((item) => item.status))), [tabItems]); const typeOptions = useMemo(() => Array.from(new Set(tabItems.map((item) => item.type).filter((item): item is string => Boolean(item)))), [tabItems]);
+  const visibleItems = useMemo(() => tabItems.filter((item) => { const haystack = `${item.title} ${item.description} ${item.clueText || ""}`.toLowerCase(); return (!query.trim() || haystack.includes(query.trim().toLowerCase())) && (statusFilter === "all" || item.status === statusFilter) && (typeFilter === "all" || item.type === typeFilter); }), [query, statusFilter, tabItems, typeFilter]);
+  const selected = visibleItems.find((item) => item.id === selectedId) || visibleItems[0] || null;
+  const setTabAndReset = (next: Tab) => { setTab(next); setStatusFilter("all"); setTypeFilter("all"); setSelectedId(next === "hooks" ? hooks[0]?.id || null : foreshadowings[0]?.id || null); };
+  const openChapter = (id: string | null) => { const chapter = chapters.find((item) => item.id === id); if (chapter) router.push(`/projects/${projectId}/chapters/${chapter.chapter_number}`); };
+  const openCount = hooks.filter((item) => !["resolved", "dropped"].includes(item.status)).length; const plantedCount = foreshadowings.filter((item) => item.status === "planted").length; const paidOffCount = foreshadowings.filter((item) => item.status === "paid_off").length;
+  return <div className="mx-auto w-full max-w-[1400px] pb-10"><header className="flex min-h-[72px] items-center justify-between gap-4 border-b border-[#e4eaf3]"><div className="flex min-w-0 items-center gap-2 text-sm text-[#7d8aa1]"><Link href="/" className="hover:text-[#2563eb]">作品库</Link><span>/</span><Link href={`/projects/${projectId}`} className="truncate hover:text-[#2563eb]">{project?.title || "当前作品"}</Link><span>/</span><span>资料库</span><span>/</span><strong className="text-[#172443]">钩子与伏笔</strong></div><span className="hidden items-center gap-1.5 text-xs text-[#718099] sm:flex"><Sparkles className="size-4 text-[#9aa6b8]" />提取与状态更新接口待接入</span></header><div className="space-y-5 pt-8"><div className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="font-serif text-[36px] font-semibold leading-tight tracking-[-.04em] text-[#101c3b]">钩子与伏笔</h1><p className="mt-2 text-[16px] text-[#718099]">跟踪悬念与线索，让铺垫获得回应。</p></div></div>{error ? <div className="flex items-start gap-2 rounded-[8px] border border-[#f0caca] bg-[#fff7f7] px-4 py-3 text-sm text-[#b54d4d]"><XCircle className="mt-0.5 size-4 shrink-0" />{error}</div> : null}<div className="grid gap-4 md:grid-cols-3"><StatCard icon={Target} label="进行中钩子" value={openCount} /><StatCard icon={Sparkles} label="已埋设伏笔" value={plantedCount} /><StatCard icon={Check} label="已回收伏笔" value={paidOffCount} tone="green" /></div><Panel className="overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e8edf4] px-4 pt-3"><div className="flex"><button type="button" onClick={() => setTabAndReset("hooks")} className={cn("border-b-2 px-4 py-3 text-sm font-semibold", tab === "hooks" ? "border-[#2563eb] text-[#2563eb]" : "border-transparent text-[#718099]")}>钩子 <span className="ml-1">（{hooks.length}）</span></button><button type="button" onClick={() => setTabAndReset("foreshadowing")} className={cn("border-b-2 px-4 py-3 text-sm font-semibold", tab === "foreshadowing" ? "border-[#2563eb] text-[#2563eb]" : "border-transparent text-[#718099]")}>伏笔 <span className="ml-1">（{foreshadowings.length}）</span></button></div><div className="flex w-full flex-wrap gap-2 pb-3 lg:w-auto"><label className="relative min-w-[220px] flex-1 lg:flex-none"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#9aa6b8]" /><input className={cn(inputClass, "w-full pl-9")} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题或内容" /></label><label className="relative"><Filter className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#9aa6b8]" /><select className={cn(inputClass, "w-[145px] appearance-none pl-9 pr-8")} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">全部状态</option>{statusOptions.map((value) => <option key={value} value={value}>{statusText({ kind: tab, id: "", title: "", description: "", status: value, type: null, sourceId: null, resolvedId: null, expectedId: null, actualId: null, clueText: null, importance: null })}</option>)}</select><ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-[#9aa6b8]" /></label>{typeOptions.length ? <label className="relative"><select className={cn(inputClass, "w-[145px] appearance-none pr-8")} value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option value="all">全部类型</option>{typeOptions.map((value) => <option key={value} value={value}>{hookTypeLabel(value)}</option>)}</select><ChevronDown className="pointer-events-none absolute right-2 top-1/2 size-4 -translate-y-1/2 text-[#9aa6b8]" /></label> : null}</div></div><div className="grid min-h-[520px] lg:grid-cols-[minmax(0,1.1fr)_minmax(380px,.9fr)]"><div className="max-h-[650px] overflow-y-auto border-r border-[#edf1f6] p-3">{loading ? <p className="p-6 text-center text-sm text-[#8995a9]">正在加载记录…</p> : !tabItems.length ? <div className="p-8 text-center text-sm text-[#8995a9]"><FileText className="mx-auto mb-3 size-7 text-[#b5c0d0]" />当前作品还没有{tab === "hooks" ? "钩子" : "伏笔"}记录。</div> : !visibleItems.length ? <div className="p-8 text-center text-sm text-[#8995a9]"><Search className="mx-auto mb-3 size-7 text-[#b5c0d0]" />没有匹配当前搜索或筛选条件的记录。</div> : visibleItems.map((item) => <button type="button" key={`${item.kind}-${item.id}`} onClick={() => setSelectedId(item.id)} className={cn("mb-2 w-full rounded-[10px] border p-4 text-left transition-colors", selected?.id === item.id ? "border-[#8eb2ff] bg-[#f1f6ff] shadow-[inset_3px_0_0_#2563eb]" : "border-[#e4eaf3] hover:border-[#cbd9ed] hover:bg-[#fbfcfe]")}><div className="flex items-start gap-3"><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><strong className="text-[15px] text-[#172443]">{item.title}</strong><StatusPill item={item} />{item.type ? <span className="rounded-full bg-[#f0eaff] px-2.5 py-1 text-xs text-[#7957c7]">{hookTypeLabel(item.type)}</span> : null}</div><p className="mt-2 line-clamp-2 text-sm leading-6 text-[#718099]">{item.description}</p><p className="mt-2 flex items-center gap-1 text-xs text-[#8995a9]">{item.sourceId ? <><BookOpen className="size-3.5" />来源：{chapterLabel(item.sourceId, chapters) || "第?章"}</> : "暂无来源章节"}</p></div><ChevronRight className="mt-1 size-4 shrink-0 text-[#9aa6b8]" /></div></button>)}</div><div className="min-w-0 p-5">{selected ? <Detail item={selected} chapters={chapters} projectId={projectId} openChapter={openChapter} /> : <div className="flex min-h-[460px] items-center justify-center text-sm text-[#8995a9]">选择一条记录查看详情。</div>}</div></div></Panel></div></div>;
 }
+
+function Detail({ item, chapters, projectId, openChapter }: { item: RecordItem; chapters: Chapter[]; projectId: string; openChapter: (id: string | null) => void }) { const source = chapterLabel(item.sourceId, chapters); const resolved = chapterLabel(item.resolvedId, chapters); const expected = chapterLabel(item.expectedId, chapters); const actual = chapterLabel(item.actualId, chapters); return <div className="space-y-5"><div className="flex items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><h2 className="font-serif text-[25px] font-semibold tracking-[-.03em] text-[#172443]">{item.title}</h2><StatusPill item={item} /></div><p className="mt-2 text-xs text-[#8995a9]">{item.kind === "hooks" ? "钩子记录" : "伏笔记录"}{item.importance ? ` · 重要性：${item.importance}` : ""}</p></div><button type="button" className="rounded-md p-2 text-[#8995a9] hover:bg-[#f2f5fa]" title="更多操作暂不可用"><CircleHelp className="size-5" /></button></div><div><h3 className="mb-2 text-sm font-semibold text-[#25365a]">内容描述</h3><p className="whitespace-pre-wrap text-sm leading-7 text-[#52627d]">{item.description}</p></div>{item.clueText ? <div className="rounded-[8px] bg-[#f7f9fc] p-4"><h3 className="text-sm font-semibold text-[#25365a]">线索原文</h3><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#52627d]">{item.clueText}</p></div> : null}<div className="border-t border-[#edf1f6] pt-4"><h3 className="mb-3 text-sm font-semibold text-[#25365a]">章节来源</h3>{source ? <div className="flex flex-wrap items-center justify-between gap-3 rounded-[8px] bg-[#f7f9fc] px-3.5 py-3"><span className="flex items-center gap-2 text-sm text-[#52627d]"><BookOpen className="size-4 text-[#6d83a8]" />{source}</span><button type="button" onClick={() => openChapter(item.sourceId)} className="rounded-[7px] border border-[#8db1ff] px-3 py-2 text-xs font-semibold text-[#2563eb] hover:bg-[#edf3ff]">打开章节</button></div> : <p className="text-sm text-[#8995a9]">没有可靠的来源章节信息，无法定位原文。</p>}</div><div className="border-t border-[#edf1f6] pt-4"><h3 className="mb-3 text-sm font-semibold text-[#25365a]">跟进信息</h3>{item.kind === "hooks" ? <div className="space-y-2 text-sm text-[#718099]"><p>解决章节：<strong className="text-[#52627d]">{resolved || "暂无真实关联"}</strong></p></div> : <div className="space-y-2 text-sm text-[#718099]"><p>计划回收章节：<strong className="text-[#52627d]">{expected || "暂无真实关联"}</strong></p><p>实际回收章节：<strong className="text-[#52627d]">{actual || "暂无真实关联"}</strong></p></div>}</div><div className="rounded-[8px] border border-dashed border-[#cdd9eb] bg-[#fbfcfe] p-3 text-xs leading-5 text-[#8995a9]">当前后端没有钩子/伏笔编辑、状态更新或从章节提取接口。本页仅展示真实记录；未找到原文定位信息时不会虚构高亮。</div><Link href={`/projects/${projectId}/chapters`} className="inline-flex items-center gap-1 text-sm font-medium text-[#2563eb] hover:underline">打开章节目录 <ChevronRight className="size-4" /></Link></div>; }

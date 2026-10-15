@@ -65,7 +65,7 @@ export default function DistillationLandingPage() {
         <div className="rounded-xl border border-dashed p-6">
           <p className="font-medium">还没有原创项目</p>
           <p className="mt-1 text-sm text-muted-foreground">先创建一本书，蒸馏结果才有落点。</p>
-          <Link href="/projects" className={cn(buttonVariants(), "mt-4 inline-flex")}>创建新书</Link>
+          <Link href="/projects?create=1" className={cn(buttonVariants(), "mt-4 inline-flex")}>创建新书</Link>
         </div>
       ) : null}
     </section>

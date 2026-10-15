@@ -1,116 +1,39 @@
 "use client";
 
 import { useMemo, useState } from "react";
-
+import { Check, ChevronDown, Eye, EyeOff, LoaderCircle, Save, TestTube2, Trash2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Field, StatusBanner } from "@/components/ui-bits";
 import { getGlobalLlmPrefs, getStoredLlmKey, setGlobalLlmPrefs, setStoredLlmKey } from "@/lib/api";
 import { getProviderPreset, LLM_PROVIDER_PRESETS, resolvePresetModel } from "@/lib/llm-presets";
+import { cn } from "@/lib/utils";
 
-const selectCls =
-  "w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
+type Slot = "generation" | "review";
+type TestState = "idle" | "testing" | "success" | "error";
+
+function Field({ label, value, onChange, hint, password = false }: { label: string; value: string; onChange: (value: string) => void; hint?: string; password?: boolean }) {
+  const [visible, setVisible] = useState(false);
+  return <label className="block space-y-1.5"><span className="text-[13px] font-semibold text-[#25365a]">{label}</span>{hint ? <span className="block text-xs leading-5 text-[#8491a7]">{hint}</span> : null}<div className="relative"><input type={password && !visible ? "password" : "text"} value={value} onChange={(e) => onChange(e.target.value)} autoComplete={password ? "new-password" : undefined} className="h-11 w-full rounded-[8px] border border-[#d6dfec] bg-white px-3.5 text-sm text-[#172443] outline-none focus:border-[#7ba3ff] focus:ring-3 focus:ring-[#2563eb]/10" />{password ? <button type="button" aria-label={visible ? "隐藏输入" : "显示输入"} onClick={() => setVisible((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8090aa]">{visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button> : null}</div></label>;
+}
+function SelectField({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: React.ReactNode }) { return <label className="block space-y-1.5"><span className="text-[13px] font-semibold text-[#25365a]">{label}</span><div className="relative"><select value={value} onChange={(e) => onChange(e.target.value)} className="h-11 w-full appearance-none rounded-[8px] border border-[#d6dfec] bg-white px-3.5 pr-10 text-sm text-[#172443] outline-none focus:border-[#7ba3ff] focus:ring-3 focus:ring-[#2563eb]/10">{children}</select><ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-[#7f8ca2]" /></div></label>; }
+function Dot({ tone }: { tone: TestState }) { return <span className={cn("inline-block size-2.5 rounded-full", tone === "success" ? "bg-[#20a778]" : tone === "error" ? "bg-[#db5f5f]" : tone === "testing" ? "animate-pulse bg-[#2563eb]" : "bg-[#a7b2c4]")} />; }
 
 export default function SettingsPage() {
   const saved = getGlobalLlmPrefs();
   const initialProvider = getProviderPreset(saved?.provider || "deepseek").id;
-  const [provider, setProvider] = useState<string>(initialProvider);
-  const [model, setModel] = useState(resolvePresetModel(initialProvider, saved?.model));
-  const [baseUrl, setBaseUrl] = useState(saved?.baseUrl || getProviderPreset(initialProvider).baseUrl);
-  const [apiKey, setApiKey] = useState(getStoredLlmKey(initialProvider));
   const initialReviewProvider = getProviderPreset(saved?.reviewProvider || "openai").id;
-  const [reviewProvider, setReviewProvider] = useState<string>(initialReviewProvider);
-  const [reviewModel, setReviewModel] = useState(resolvePresetModel(initialReviewProvider, saved?.reviewModel));
-  const [reviewBaseUrl, setReviewBaseUrl] = useState(saved?.reviewBaseUrl || getProviderPreset(initialReviewProvider).baseUrl);
-  const [reviewApiKey, setReviewApiKey] = useState(getStoredLlmKey(initialReviewProvider));
-  const [ok, setOk] = useState<string | null>(null);
-  const preset = useMemo(() => getProviderPreset(provider), [provider]);
-  const reviewPreset = useMemo(() => getProviderPreset(reviewProvider), [reviewProvider]);
-
-  function applyProvider(next: string) {
-    const nextPreset = getProviderPreset(next);
-    setProvider(next);
-    setModel(nextPreset.defaultModel);
-    setBaseUrl(nextPreset.baseUrl);
-    setApiKey(getStoredLlmKey(next));
-    setOk(null);
-  }
-
-  function applyReviewProvider(next: string) {
-    const nextPreset = getProviderPreset(next);
-    setReviewProvider(next);
-    setReviewModel(nextPreset.defaultModel);
-    setReviewBaseUrl(nextPreset.baseUrl);
-    setReviewApiKey(getStoredLlmKey(next));
-    setOk(null);
-  }
-
-  function save() {
-    if (provider === reviewProvider && model === reviewModel) {
-      setOk("生成模型和审查模型不能相同，请选择不同的模型。");
-      return;
-    }
-    setStoredLlmKey(apiKey.trim(), provider);
-    setStoredLlmKey(reviewApiKey.trim(), reviewProvider);
-    setGlobalLlmPrefs({
-      provider,
-      model,
-      baseUrl: baseUrl.trim(),
-      reviewProvider,
-      reviewModel,
-      reviewBaseUrl: reviewBaseUrl.trim(),
-    });
-    const cleared = [
-      !apiKey.trim() ? "生成 API Key" : "",
-      !reviewApiKey.trim() ? "审查 API Key" : "",
-    ].filter(Boolean);
-    setOk(
-      `已保存：生成使用 ${preset.label} / ${model}，审查使用 ${reviewPreset.label} / ${reviewModel}。${
-        cleared.length ? `${cleared.join("、")}已清除。` : "Key 已脱敏保存。"
-      }`,
-    );
-  }
-
-  return (
-    <section className="max-w-xl space-y-3">
-      <h1 className="text-2xl font-semibold">AI 设置</h1>
-      <p className="text-sm text-muted-foreground">生成模型负责写作和局部修改；审查模型必须独立于生成模型。</p>
-      <StatusBanner ok={ok} />
-      <label className="block space-y-1">
-        <span className="text-xs font-medium text-muted-foreground">提供商 Provider</span>
-        <select className={selectCls} value={provider} onChange={(e) => applyProvider(e.target.value)}>
-          {LLM_PROVIDER_PRESETS.map((item) => (
-            <option key={item.id} value={item.id}>{item.label}</option>
-          ))}
-        </select>
-      </label>
-      <label className="block space-y-1">
-        <span className="text-xs font-medium text-muted-foreground">模型 Model</span>
-        <select className={selectCls} value={model} onChange={(e) => setModel(e.target.value)}>
-          {preset.models.map((item) => (
-            <option key={item.id} value={item.id}>{item.label}</option>
-          ))}
-        </select>
-      </label>
-      <Field label="Base URL（可留空使用默认）" value={baseUrl} onChange={setBaseUrl} />
-      <Field label={`${preset.label} API Key`} value={apiKey} onChange={setApiKey} type="password" allowReveal />
-      <div className="border-t pt-4" />
-      <h2 className="text-lg font-semibold">审查模型</h2>
-      <label className="block space-y-1">
-        <span className="text-xs font-medium text-muted-foreground">审查提供商 Provider</span>
-        <select className={selectCls} value={reviewProvider} onChange={(e) => applyReviewProvider(e.target.value)}>
-          {LLM_PROVIDER_PRESETS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-        </select>
-      </label>
-      <label className="block space-y-1">
-        <span className="text-xs font-medium text-muted-foreground">审查模型 Model</span>
-        <select className={selectCls} value={reviewModel} onChange={(e) => setReviewModel(e.target.value)}>
-          {reviewPreset.models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-        </select>
-      </label>
-      <Field label="审查 Base URL（可留空使用默认）" value={reviewBaseUrl} onChange={setReviewBaseUrl} />
-      <Field label={`${reviewPreset.label} 审查 API Key`} value={reviewApiKey} onChange={setReviewApiKey} type="password" allowReveal />
-      <p className="text-xs text-muted-foreground">两套 API Key 只保存在当前浏览器，并以密码形式显示；审查模型未配置时不会自动视为通过。</p>
-      <Button onClick={save}>保存</Button>
-    </section>
-  );
+  const [provider, setProvider] = useState<string>(initialProvider); const [model, setModel] = useState(resolvePresetModel(initialProvider, saved?.model)); const [baseUrl, setBaseUrl] = useState(saved?.baseUrl || getProviderPreset(initialProvider).baseUrl); const [keyDraft, setKeyDraft] = useState(""); const [hasKey, setHasKey] = useState(Boolean(getStoredLlmKey(initialProvider))); const [clearKey, setClearKey] = useState(false);
+  const [reviewProvider, setReviewProvider] = useState<string>(initialReviewProvider); const [reviewModel, setReviewModel] = useState(resolvePresetModel(initialReviewProvider, saved?.reviewModel)); const [reviewBaseUrl, setReviewBaseUrl] = useState(saved?.reviewBaseUrl || getProviderPreset(initialReviewProvider).baseUrl); const [reviewKeyDraft, setReviewKeyDraft] = useState(""); const [hasReviewKey, setHasReviewKey] = useState(Boolean(getStoredLlmKey(initialReviewProvider))); const [clearReviewKey, setClearReviewKey] = useState(false);
+  const [activeSlot, setActiveSlot] = useState<Slot>("generation"); const [testState, setTestState] = useState<TestState>("idle"); const [message, setMessage] = useState<string | null>(null); const [error, setError] = useState<string | null>(null); const [saving, setSaving] = useState(false); const preset = useMemo(() => getProviderPreset(provider), [provider]); const reviewPreset = useMemo(() => getProviderPreset(reviewProvider), [reviewProvider]);
+  function resetTest() { setTestState("idle"); setMessage(null); setError(null); }
+  function changeProvider(next: string) { const p = getProviderPreset(next); setProvider(next); setModel(p.defaultModel); setBaseUrl(p.baseUrl); setKeyDraft(""); setClearKey(false); setHasKey(Boolean(getStoredLlmKey(next))); resetTest(); }
+  function changeReviewProvider(next: string) { const p = getProviderPreset(next); setReviewProvider(next); setReviewModel(p.defaultModel); setReviewBaseUrl(p.baseUrl); setReviewKeyDraft(""); setClearReviewKey(false); setHasReviewKey(Boolean(getStoredLlmKey(next))); resetTest(); }
+  function clear(slot: Slot) { const label = slot === "generation" ? preset.label : reviewPreset.label; if (window.confirm(`确认清除 ${label} 的浏览器 API Key？`)) { if (slot === "generation") { setClearKey(true); setKeyDraft(""); } else { setClearReviewKey(true); setReviewKeyDraft(""); } resetTest(); } }
+  async function test(slot: Slot) { const generation = slot === "generation"; const selectedProvider = generation ? provider : reviewProvider; const selectedModel = generation ? model : reviewModel; const selectedBaseUrl = generation ? baseUrl : reviewBaseUrl; const key = generation ? keyDraft : reviewKeyDraft; setActiveSlot(slot); setTestState("testing"); setError(null); setMessage(null); try { const { api } = await import("@/lib/api"); await api("/settings/llm/test", { method: "POST", headers: { "X-LLM-Provider": selectedProvider, "X-LLM-Model": selectedModel, "X-LLM-Base-Url": selectedBaseUrl.trim(), ...(key.trim() ? { "X-LLM-Api-Key": key.trim() } : {}) }, body: "{}" }); setTestState("success"); setMessage(`${generation ? "生成" : "审查"}模型连接成功。测试使用当前表单值，尚未保存。`); } catch (err) { setTestState("error"); setError(err instanceof Error ? err.message : "连接失败，请检查网络、认证信息和模型配置"); } }
+  function save() { setError(null); setMessage(null); if (provider === reviewProvider && model === reviewModel) { setError("生成模型和审查模型不能相同，请选择独立的审查模型。"); return; } setSaving(true); try { if (clearKey) setStoredLlmKey("", provider); else if (keyDraft.trim()) setStoredLlmKey(keyDraft.trim(), provider); if (clearReviewKey) setStoredLlmKey("", reviewProvider); else if (reviewKeyDraft.trim()) setStoredLlmKey(reviewKeyDraft.trim(), reviewProvider); setGlobalLlmPrefs({ provider, model, baseUrl: baseUrl.trim(), reviewProvider, reviewModel, reviewBaseUrl: reviewBaseUrl.trim() }); setHasKey(!clearKey && Boolean(keyDraft.trim() || hasKey)); setHasReviewKey(!clearReviewKey && Boolean(reviewKeyDraft.trim() || hasReviewKey)); setKeyDraft(""); setReviewKeyDraft(""); setClearKey(false); setClearReviewKey(false); setTestState("idle"); setMessage("已保存全局模型与审查配置。"); } finally { setSaving(false); } }
+  const currentKey = activeSlot === "generation" ? hasKey && !clearKey : hasReviewKey && !clearReviewKey;
+  return <div className="mx-auto w-full max-w-[1180px] pb-12"><header className="flex min-h-[72px] items-center justify-between gap-4 border-b border-[#e4eaf3]"><div className="flex items-center gap-2 text-sm text-[#7d8aa1]"><span>工作室</span><span>/</span><strong className="text-[#172443]">AI 设置</strong></div><Button className="h-10 bg-[#2563eb] px-5 hover:bg-[#1d4ed8]" disabled={saving} onClick={save}><Save className="size-4" />{saving ? "保存中…" : "保存修改"}</Button></header><div className="space-y-5 pt-8"><div><h1 className="font-serif text-[34px] font-semibold leading-tight tracking-[-.04em] text-[#101c3b]">AI 设置</h1><p className="mt-2 text-[15px] text-[#718099]">管理全局模型连接与审查规则</p></div>{error ? <div className="flex gap-2 rounded-[8px] border border-[#f0caca] bg-[#fff7f7] px-4 py-3 text-sm text-[#b54d4d]"><XCircle className="size-4" />{error}</div> : null}{message ? <div className="flex gap-2 rounded-[8px] border border-[#c6eadc] bg-[#f4fcf8] px-4 py-3 text-sm text-[#167957]"><Check className="size-4" />{message}</div> : null}<div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.8fr)_minmax(285px,.9fr)]"><div className="space-y-5"><Panel title="生成模型" badge="全局配置"><div className="grid gap-5 sm:grid-cols-2"><SelectField label="提供商" value={provider} onChange={changeProvider}>{LLM_PROVIDER_PRESETS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</SelectField><SelectField label="模型" value={model} onChange={(v) => { setModel(v); resetTest(); }}>{preset.models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</SelectField></div><div className="mt-5 space-y-5"><Field label="Base URL" value={baseUrl} onChange={(v) => { setBaseUrl(v); resetTest(); }} hint={`当前有效地址；留空将使用 ${preset.baseUrl}`} /><KeyField label={`${preset.label} API Key`} value={keyDraft} onChange={(v) => { setKeyDraft(v); setClearKey(false); resetTest(); }} configured={hasKey && !clearKey} onClear={() => clear("generation")} /><Actions slot="generation" state={activeSlot === "generation" ? testState : "idle"} onTest={() => void test("generation")} onSave={save} saving={saving} /></div></Panel><Panel title="审查模型" badge="全局配置"><p className="mb-5 text-sm leading-6 text-[#718099]">审查模型必须独立于生成模型，用于文学审查、连续性检查与发布前质量门禁。</p><div className="grid gap-5 sm:grid-cols-2"><SelectField label="审查提供商" value={reviewProvider} onChange={changeReviewProvider}>{LLM_PROVIDER_PRESETS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</SelectField><SelectField label="审查模型" value={reviewModel} onChange={(v) => { setReviewModel(v); resetTest(); }}>{reviewPreset.models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</SelectField></div><div className="mt-5 space-y-5"><Field label="审查 Base URL" value={reviewBaseUrl} onChange={(v) => { setReviewBaseUrl(v); resetTest(); }} hint={`当前有效地址；留空将使用 ${reviewPreset.baseUrl}`} /><KeyField label={`${reviewPreset.label} 审查 API Key`} value={reviewKeyDraft} onChange={(v) => { setReviewKeyDraft(v); setClearReviewKey(false); resetTest(); }} configured={hasReviewKey && !clearReviewKey} onClear={() => clear("review")} /><Actions slot="review" state={activeSlot === "review" ? testState : "idle"} onTest={() => void test("review")} onSave={save} saving={saving} /></div></Panel></div><aside className="space-y-5 lg:sticky lg:top-5"><Panel title="当前配置"><dl className="space-y-4 text-sm"><Summary label="生成模型" value={`${preset.label} / ${model}`} /><Summary label="审查模型" value={`${reviewPreset.label} / ${reviewModel}`} /><Summary label="作用范围" value="全局" /><Summary label="凭据" value={currentKey ? "浏览器配置" : "服务端环境变量或未配置"} /></dl><p className="mt-5 rounded-[8px] bg-[#f5f8fd] p-3 text-xs leading-5 text-[#718099]">浏览器中输入的 Key 按提供商独立保存，空白输入会保留原值；服务端 Key 不会下发到页面。</p></Panel><Panel title="配置说明"><div className="space-y-3 text-sm leading-6 text-[#718099]"><p>生成模型用于写作、改写和创作流程。</p><p>审查模型用于文学审核与质量门禁，必须与生成模型不同。</p><p>修改后需要点击“保存修改”才会成为全局生效配置。</p></div></Panel></aside></div></div></div>;
 }
+function Panel({ title, badge, children }: { title: string; badge?: string; children: React.ReactNode }) { return <section className="rounded-[12px] border border-[#e2e8f1] bg-white p-6 shadow-[0_8px_24px_rgba(35,55,95,.045)]"><div className="mb-5 flex items-center gap-2 border-b border-[#edf1f6] pb-4"><h2 className="text-[18px] font-bold text-[#172443]">{title}</h2>{badge ? <span className="rounded-full bg-[#edf3ff] px-2 py-0.5 text-[11px] text-[#2563eb]">{badge}</span> : null}</div>{children}</section>; }
+function KeyField({ label, value, onChange, configured, onClear }: { label: string; value: string; onChange: (value: string) => void; configured: boolean; onClear: () => void }) { return <div><Field label={label} value={value} onChange={onChange} password hint={configured ? "已配置。留空表示保留现有值；输入新值可替换。" : "仅保存于当前浏览器，不会写入数据库。"} /><div className="mt-2 flex items-center justify-between text-xs"><span className="text-[#718099]">{configured ? "● 已配置" : "● 未配置"}</span>{configured ? <button type="button" onClick={onClear} className="inline-flex items-center gap-1 text-[#c15d5d]"><Trash2 className="size-3.5" />清除凭据</button> : null}</div></div>; }
+function Actions({ slot, state, onTest, onSave, saving }: { slot: Slot; state: TestState; onTest: () => void; onSave: () => void; saving: boolean }) { return <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#edf1f6] pt-5"><span className={cn("flex items-center gap-2 text-sm", state === "success" ? "text-[#17825d]" : state === "error" ? "text-[#b64f4f]" : "text-[#7d8aa1]")}><Dot tone={state} />{state === "success" ? "连接成功" : state === "error" ? "连接失败" : state === "testing" ? "正在连接" : "尚未测试"}</span><div className="flex gap-2"><Button variant="outline" className="h-10 border-[#8db1ff] text-[#2563eb]" disabled={state === "testing"} onClick={onTest}>{state === "testing" ? <LoaderCircle className="size-4 animate-spin" /> : <TestTube2 className="size-4" />}测试连接</Button><Button className="h-10 bg-[#2563eb] hover:bg-[#1d4ed8]" disabled={saving} onClick={onSave}><Save className="size-4" />保存修改</Button></div></div>; }
+function Summary({ label, value }: { label: string; value: string }) { return <div className="grid grid-cols-[76px_1fr] gap-3"><dt className="text-[#8491a7]">{label}</dt><dd className="break-all font-semibold text-[#25365a]">{value}</dd></div>; }

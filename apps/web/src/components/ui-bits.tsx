@@ -40,6 +40,7 @@ export function Field({
   readOnly,
   type = "text",
   allowReveal = false,
+  hint,
 }: {
   label: string;
   value: string;
@@ -49,6 +50,7 @@ export function Field({
   readOnly?: boolean;
   type?: "text" | "password";
   allowReveal?: boolean;
+  hint?: string;
 }) {
   const [revealed, setRevealed] = useState(false);
   const cls =
@@ -79,6 +81,7 @@ export function Field({
           ) : null}
         </div>
       )}
+      {hint ? <span className="block text-xs text-muted-foreground">{hint}</span> : null}
     </label>
   );
 }

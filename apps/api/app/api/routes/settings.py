@@ -33,6 +33,18 @@ async def test_llm_settings(
     return {"status": "ok", "provider": result.provider, "model": result.model}
 
 
+@router.post("/settings/llm/test")
+async def test_global_llm_settings(
+    provider: Annotated[LLMProvider, Depends(get_llm_provider)],
+) -> dict[str, str]:
+    """Test the global form headers without reading or writing project settings."""
+    result = await provider.generate(
+        [ChatMessage(role="user", content="Reply with exactly: connection ok")],
+        temperature=0,
+    )
+    return {"status": "ok", "provider": result.provider, "model": result.model}
+
+
 @router.get("/projects/{project_id}/settings/llm")
 async def get_llm_settings(
     project_id: UUID,

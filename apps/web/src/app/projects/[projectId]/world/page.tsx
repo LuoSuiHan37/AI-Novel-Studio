@@ -1,87 +1,64 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, BookOpen, Check, ChevronRight, CircleHelp, FileText, Info, Layers3, Plus, Save, ShieldCheck, Sparkles, Trash2, Users, XCircle } from "lucide-react";
 
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Field, StatusBanner } from "@/components/ui-bits";
+import { Button } from "@/components/ui/button";
 import { api, ApiError } from "@/lib/api";
-import { confirmResource, tryAdvancePipeline } from "@/lib/hitl";
-import { approvalStatusLabel } from "@/lib/labels";
-import type { WorldBible } from "@/lib/types";
+import { tryAdvancePipeline } from "@/lib/hitl";
+import type { Project, WorldBible, WorldRule } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+type RuleDraft = Omit<WorldRule, "id" | "world_bible_id">;
+const inputClass = "h-11 w-full rounded-[8px] border border-[#d5dfed] bg-white px-3.5 text-sm text-[#1d2b49] outline-none transition placeholder:text-[#a4afbf] focus:border-[#7da3f5] focus:ring-3 focus:ring-[#2563eb]/10";
+const textAreaClass = "w-full resize-y rounded-[8px] border border-[#d5dfed] bg-white px-3.5 py-3 text-sm leading-6 text-[#1d2b49] outline-none transition placeholder:text-[#a4afbf] focus:border-[#7da3f5] focus:ring-3 focus:ring-[#2563eb]/10";
+
+function Panel({ children, className }: { children: React.ReactNode; className?: string }) { return <section className={cn("rounded-[12px] border border-[#e1e8f2] bg-white shadow-[0_8px_24px_rgba(35,55,95,.045)]", className)}>{children}</section>; }
+function StatusBadge({ status, dirty }: { status: string; dirty: boolean }) { if (dirty && status === "approved") return <span className="inline-flex items-center gap-1.5 rounded-full bg-[#fff4df] px-3 py-1.5 text-xs font-semibold text-[#b36a00]"><Info className="size-3.5" />当前编辑稿未批准</span>; if (status === "approved") return <span className="inline-flex items-center gap-1.5 rounded-full bg-[#eaf9f2] px-3 py-1.5 text-xs font-semibold text-[#16855f]"><Check className="size-3.5" />已批准</span>; if (status === "pending_review") return <span className="inline-flex items-center gap-1.5 rounded-full bg-[#fff4df] px-3 py-1.5 text-xs font-semibold text-[#b36a00]"><Info className="size-3.5" />待批准</span>; return <span className="inline-flex items-center gap-1.5 rounded-full bg-[#f1f4f8] px-3 py-1.5 text-xs font-semibold text-[#718099]">草稿</span>; }
+function emptyRule(): RuleDraft { return { name: "", category: "general", description: "", is_hard_constraint: true }; }
+function RulePreview({ rules }: { rules: RuleDraft[] }) { const visible = rules.filter((rule) => rule.description.trim()); return <div className="space-y-3">{visible.length ? visible.map((rule, index) => <div key={`${rule.name}-${index}`} className="flex gap-3 text-sm leading-6 text-[#52627d]"><span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-[#2563eb] text-xs font-semibold text-white">{index + 1}</span><div><span className="font-semibold text-[#25365a]">{rule.name || `规则 ${index + 1}`}</span><p>{rule.description}</p></div></div>) : <p className="text-sm text-[#8995a9]">尚未填写硬性规则。</p>}</div>; }
+function RuleEditor({ rule, index, onChange, onRemove }: { rule: RuleDraft; index: number; onChange: (next: RuleDraft) => void; onRemove: () => void }) { return <div className="rounded-[10px] border border-[#e1e8f2] bg-[#fbfcfe] p-4"><div className="mb-3 flex items-center justify-between gap-3"><span className="text-sm font-semibold text-[#25365a]">规则 {index + 1}</span><button type="button" className="rounded-md p-1.5 text-[#9aa6b8] hover:bg-[#f2f5fa] hover:text-[#c44d55]" onClick={onRemove} aria-label={`删除规则 ${index + 1}`}><Trash2 className="size-4" /></button></div><div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_150px]"><label className="block"><span className="mb-1.5 block text-xs font-medium text-[#52627d]">规则名称</span><input className={inputClass} value={rule.name} onChange={(event) => onChange({ ...rule, name: event.target.value })} placeholder="例如：潮汐规律" /></label><label className="block"><span className="mb-1.5 block text-xs font-medium text-[#52627d]">分类</span><input className={inputClass} value={rule.category} onChange={(event) => onChange({ ...rule, category: event.target.value })} placeholder="general" /></label></div><label className="mt-3 block"><span className="mb-1.5 block text-xs font-medium text-[#52627d]">规则内容</span><textarea className={cn(textAreaClass, "min-h-24")} value={rule.description} onChange={(event) => onChange({ ...rule, description: event.target.value })} placeholder="写下故事中不可违背的规则" /></label><label className="mt-3 inline-flex items-center gap-2 text-xs text-[#718099]"><input type="checkbox" checked={rule.is_hard_constraint} onChange={(event) => onChange({ ...rule, is_hard_constraint: event.target.checked })} className="size-4 accent-[#2563eb]" />硬性约束，生成与审查时必须遵守</label></div>; }
+function SummaryRow({ icon: Icon, label, value }: { icon: typeof BookOpen; label: string; value: string }) { return <div className="flex items-start gap-3 border-b border-[#eef2f7] py-3 last:border-b-0"><Icon className="mt-0.5 size-4 shrink-0 text-[#6d83a8]" /><span className="min-w-0 flex-1 text-sm text-[#52627d]">{label}</span><strong className="max-w-[65%] text-right text-sm font-medium text-[#25365a]">{value}</strong></div>; }
+
 export default function WorldPage() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const [name, setName] = useState("Moonridge Pack");
-  const [summary, setSummary] = useState("Mountain pack under an Alpha King. Mate bonds can be publicly rejected.");
-  const [rule, setRule] = useState("A public rejection before the pack severs Luna rank.");
-  const [status, setStatus] = useState("draft");
-  const [error, setError] = useState<string | null>(null);
-  const [ok, setOk] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    api<WorldBible>(`/projects/${projectId}/world`)
-      .then((world) => {
-        setName(world.name);
-        setSummary(world.summary);
-        setStatus(world.status);
-        if (world.rules[0]) setRule(world.rules[0].description);
-      })
-      .catch(() => undefined)
-      .finally(() => setLoading(false));
-  }, [projectId]);
-
-  async function saveAndConfirm() {
-    setBusy(true);
-    setError(null);
-    try {
-      const saved = await api<WorldBible>(`/projects/${projectId}/world`, {
-        method: "PATCH",
-        projectId,
-        body: JSON.stringify({
-          name,
-          summary,
-          factions: ["Moonridge Pack"],
-          rules: [{ name: "Public rejection", category: "mate_bond", description: rule, is_hard_constraint: true }],
-        }),
-      });
-      setStatus(saved.status);
-      if (saved.status !== "approved") {
-        await confirmResource(`/projects/${projectId}/world/submit`, `/projects/${projectId}/world/approve`, projectId);
-        const world = await api<WorldBible>(`/projects/${projectId}/world`);
-        setStatus(world.status);
-      }
-      await tryAdvancePipeline(projectId);
-      setOk("世界观已保存，已自动确定。可回概览看下一步。");
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "保存失败");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section className="max-w-3xl space-y-3">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h1 className="text-2xl font-semibold">世界观</h1>
-          <p className="text-sm text-muted-foreground">状态：{approvalStatusLabel(status)} · 点一次即可过门禁</p>
+  const { projectId } = useParams<{ projectId: string }>(); const router = useRouter();
+  const [project, setProject] = useState<Project | null>(null); const [name, setName] = useState(""); const [summary, setSummary] = useState(""); const [geography, setGeography] = useState(""); const [factions, setFactions] = useState<string[]>([]); const [factionDraft, setFactionDraft] = useState(""); const [rules, setRules] = useState<RuleDraft[]>([]); const [status, setStatus] = useState("draft"); const [savedSnapshot, setSavedSnapshot] = useState(""); const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [ok, setOk] = useState<string | null>(null);
+  const snapshot = useMemo(() => JSON.stringify({ name, summary, geography, factions, rules }), [name, summary, geography, factions, rules]); const dirty = Boolean(savedSnapshot) && snapshot !== savedSnapshot; const worldName = name.trim() || "未命名世界"; const ruleCount = rules.filter((rule) => rule.description.trim()).length;
+  useEffect(() => { let active = true; Promise.all([api<Project>(`/projects/${projectId}`), api<WorldBible>(`/projects/${projectId}/world`).catch((err: unknown) => err instanceof ApiError && err.status === 404 ? null : Promise.reject(err))]).then(([loadedProject, world]) => { if (!active) return; setProject(loadedProject); const next = world || { name: "", summary: "", geography: null, factions: [], rules: [], status: "draft" }; const nextRules = (next.rules || []).map(({ id, ...rule }) => { void id; return rule; }); setName(next.name || ""); setSummary(next.summary || ""); setGeography(next.geography || ""); setFactions(next.factions || []); setRules(nextRules); setStatus(next.status || "draft"); setSavedSnapshot(JSON.stringify({ name: next.name || "", summary: next.summary || "", geography: next.geography || "", factions: next.factions || [], rules: nextRules })); }).catch((err: unknown) => { if (active) setError(err instanceof ApiError ? err.message : "世界观加载失败，请重试"); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, [projectId]);
+  useEffect(() => { function warn(event: BeforeUnloadEvent) { if (!dirty) return; event.preventDefault(); event.returnValue = ""; } window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn); }, [dirty]);
+  function leave(path: string) { if (dirty && !window.confirm("当前世界观有未保存修改，确定离开吗？")) return; router.push(path); }
+  function updateRule(index: number, next: RuleDraft) { setRules((current) => current.map((rule, itemIndex) => itemIndex === index ? next : rule)); setOk(null); }
+  function addFaction() { const value = factionDraft.trim(); if (!value) return; setFactions((current) => Array.from(new Set([...current, value]))); setFactionDraft(""); setOk(null); }
+  function updateFactions(value: string | string[]) { setFactions(Array.isArray(value) ? value : value.split(/[、，,\n]/).map((item) => item.trim()).filter(Boolean)); setOk(null); }
+  async function save(approve = false) { if (!name.trim() || !summary.trim()) { setError("请填写世界名称和摘要。"); return; } setBusy(true); setError(null); setOk(null); try { const saved = await api<WorldBible>(`/projects/${projectId}/world`, { method: "PATCH", projectId, body: JSON.stringify({ name: name.trim(), summary, geography: geography || null, factions, rules }) }); let final = saved; if (approve) { await api(`/projects/${projectId}/world/submit`, { method: "POST", projectId }); final = await api<WorldBible>(`/projects/${projectId}/world/approve`, { method: "POST", projectId, body: JSON.stringify({ confirmed_by: "studio-user" }) }); await tryAdvancePipeline(projectId); } setStatus(final.status); setSavedSnapshot(JSON.stringify({ name, summary, geography, factions, rules })); setOk(approve ? "世界观已保存并批准，后续创作将使用这份设定。" : "世界观草稿已保存，尚未批准。 "); } catch (err) { setError(err instanceof ApiError ? err.message : approve ? "保存并批准失败，请检查后重试。" : "世界观保存失败，请检查后重试。"); } finally { setBusy(false); } }
+  const preview = <div className="space-y-4 lg:sticky lg:top-5"><Panel className="overflow-hidden"><div className="border-b border-[#edf1f6] px-5 py-4"><h2 className="text-[18px] font-bold text-[#172443]">设定预览</h2><p className="mt-1 text-xs text-[#9aa6b8]">编辑预览 · 尚未代表已保存或已批准版本</p></div><div className="space-y-5 p-5"><div><p className="text-xs font-semibold text-[#718099]">世界名称</p><h3 className="mt-1 text-[21px] font-bold tracking-[-.03em] text-[#172443]">{worldName}</h3>{factions.length ? <div className="mt-2 flex flex-wrap gap-1.5">{factions.map((item) => <span key={item} className="rounded-full bg-[#edf3ff] px-2.5 py-1 text-xs font-medium text-[#2563eb]">{item}</span>)}</div> : null}</div><div className="border-t border-[#edf1f6] pt-4"><p className="text-xs font-semibold text-[#718099]">世界简介</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#52627d]">{summary || "尚未填写世界简介。"}</p></div><div className="border-t border-[#edf1f6] pt-4"><p className="text-xs font-semibold text-[#718099]">硬性规则 · {ruleCount} 条</p><div className="mt-3"><RulePreview rules={rules} /></div></div></div></Panel><Panel className="p-5"><h2 className="text-[17px] font-bold text-[#172443]">使用范围</h2><div className="mt-3 space-y-1"><SummaryRow icon={BookOpen} label="大纲策划" value="用于主线与故事弧设计" /><SummaryRow icon={Layers3} label="章节计划" value="用于规划章节内容" /><SummaryRow icon={FileText} label="正文生成" value="批准后注入生成上下文" /><SummaryRow icon={ShieldCheck} label="一致性审查" value="批准后参与检查" /></div><div className="mt-4 flex gap-2 rounded-[8px] bg-[#edf5ff] p-3 text-xs leading-5 text-[#3970c9]"><CircleHelp className="mt-0.5 size-4 shrink-0" />只有批准后的世界观才会作为后续创作门禁依据。</div></Panel><Panel className="p-5"><h2 className="flex items-center gap-2 text-[17px] font-bold text-[#172443]"><Users className="size-4 text-[#6d83a8]" />相关内容</h2><p className="mt-3 text-sm text-[#8995a9]">当前没有世界观与角色、章节的直接关联数据。</p></Panel></div>;
+  return <div className="mx-auto w-full max-w-[1400px] pb-10">
+    <header className="flex min-h-[72px] items-center justify-between gap-4 border-b border-[#e4eaf3]">
+      <div className="flex min-w-0 items-center gap-2 text-sm text-[#7d8aa1]"><button type="button" onClick={() => leave("/")} className="hover:text-[#2563eb]">作品库</button><span>/</span><Link href={`/projects/${projectId}`} className="truncate hover:text-[#2563eb]">{project?.title || "当前作品"}</Link><span>/</span><span>资料库</span><span>/</span><strong className="text-[#172443]">世界观</strong></div>
+      <div className="flex items-center gap-2"><span className={cn("hidden text-xs sm:inline", busy ? "text-[#c27a00]" : dirty ? "text-[#c27a00]" : "text-[#16855f]")}>{busy ? "保存中…" : dirty ? "未保存" : "已保存"}</span><Button className="h-10 bg-[#2563eb] px-5 hover:bg-[#1d4ed8]" disabled={busy || !dirty} onClick={() => void save(false)}><Save className="size-4" />保存修改</Button></div>
+    </header>
+    <div className="space-y-5 pt-8">
+      <div className="flex flex-wrap items-end justify-between gap-4"><div><h1 className="font-serif text-[36px] font-semibold leading-tight tracking-[-.04em] text-[#101c3b]">世界观</h1><p className="mt-2 text-[16px] text-[#718099]">定义故事发生的世界与不可违背的规则。</p></div><div className="flex items-center gap-2"><span className="hidden items-center gap-1.5 text-xs text-[#718099] sm:flex"><Sparkles className="size-4 text-[#9aa6b8]" />暂无世界观 AI 生成接口</span><Button variant="outline" className="h-10" onClick={() => leave(`/projects/${projectId}`)}><ArrowLeft className="size-4" />返回概览</Button></div></div>
+      {error ? <div className="flex items-start gap-2 rounded-[8px] border border-[#f0caca] bg-[#fff7f7] px-4 py-3 text-sm text-[#b54d4d]"><XCircle className="mt-0.5 size-4 shrink-0" />{error}</div> : null}
+      {ok ? <div className="flex items-start gap-2 rounded-[8px] border border-[#c6eadc] bg-[#f4fcf8] px-4 py-3 text-sm text-[#167957]"><Check className="mt-0.5 size-4 shrink-0" />{ok}</div> : null}
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.9fr)_minmax(300px,.9fr)]">
+        <div className="space-y-5">
+          <Panel><div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf1f6] px-6 py-5"><div><h2 className="text-[19px] font-bold text-[#172443]">基础设定</h2><p className="mt-1 text-sm text-[#7d8aa1]">世界观属于当前作品：{project?.title || "当前作品"}</p></div><StatusBadge status={status} dirty={dirty} /></div>
+            <div className="space-y-5 p-6">
+              <label className="block"><span className="mb-1.5 block text-[13px] font-semibold text-[#25365a]">世界名称</span><input className={inputClass} value={name} onChange={(event) => { setName(event.target.value); setOk(null); }} placeholder="输入世界名称" /></label>
+              <label className="block"><span className="mb-1.5 block text-[13px] font-semibold text-[#25365a]">摘要</span><textarea className={cn(textAreaClass, "min-h-32")} value={summary} onChange={(event) => { setSummary(event.target.value); setOk(null); }} placeholder="概括世界的主要特征、环境与力量关系" /></label>
+              <label className="block"><span className="mb-1.5 block text-[13px] font-semibold text-[#25365a]">地理与环境 <span className="font-normal text-[#9aa6b8]">（可选）</span></span><textarea className={cn(textAreaClass, "min-h-24")} value={geography} onChange={(event) => { setGeography(event.target.value); setOk(null); }} placeholder="描述重要地点、地理限制和环境规律" /></label>
+              <div><span className="mb-1.5 block text-[13px] font-semibold text-[#25365a]">势力 / 阵营 <span className="font-normal text-[#9aa6b8]">（可选）</span></span><div className="flex min-h-11 flex-wrap items-center gap-2 rounded-[8px] border border-[#d5dfed] bg-white px-3 py-1.5">{factions.map((item) => <span key={item} className="inline-flex items-center gap-1 rounded-full bg-[#edf3ff] px-2.5 py-1 text-xs font-medium text-[#3266c7]">{item}<button type="button" onClick={() => updateFactions(factions.filter((value) => value !== item))} aria-label={`删除势力 ${item}`}><XCircle className="size-3" /></button></span>)}<input className="min-w-32 flex-1 border-0 px-1 py-1 text-sm outline-none" value={factionDraft} placeholder="输入后回车添加" onChange={(event) => setFactionDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); addFaction(); } }} /></div><p className="mt-1.5 text-xs text-[#8995a9]">保留后端原有势力数组，不自动生成标签。</p></div>
+            </div>
+          </Panel>
+          <Panel><div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf1f6] px-6 py-5"><div><h2 className="text-[19px] font-bold text-[#172443]">硬性规则</h2><p className="mt-1 text-sm text-[#7d8aa1]">写作、章节计划和审查时需要遵守的世界设定。</p></div><span className="flex items-center gap-1.5 text-xs text-[#718099]"><Info className="size-4" />修改已批准内容后需要重新批准</span></div>
+            <div className="space-y-4 p-6">{rules.map((rule, index) => <RuleEditor key={`${index}-${rule.name}`} rule={rule} index={index} onChange={(next) => updateRule(index, next)} onRemove={() => setRules((current) => current.filter((_, itemIndex) => itemIndex !== index))} />)}<button type="button" className="flex w-full items-center justify-center gap-2 rounded-[8px] border border-dashed border-[#b8cae5] py-3 text-sm font-medium text-[#2563eb] hover:bg-[#f6f9ff]" onClick={() => setRules((current) => [...current, emptyRule()])}><Plus className="size-4" />添加硬性规则</button><div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#edf1f6] pt-5"><p className="text-xs text-[#8995a9]">保存草稿不会批准内容；修改已批准内容后会回到草稿，需要重新批准。</p><div className="flex flex-wrap justify-end gap-2"><Button variant="outline" disabled={busy || !dirty} onClick={() => void save(false)}>保存草稿</Button><Button className="bg-[#2563eb] hover:bg-[#1d4ed8]" disabled={busy || !dirty} onClick={() => void save(true)}>{busy ? "处理中…" : "保存并批准"}<ChevronRight className="size-4" /></Button></div></div></div>
+          </Panel>
         </div>
-        <Link href={`/projects/${projectId}`} className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "inline-flex")}>
-          回概览
-        </Link>
+        <aside>{loading ? <Panel className="p-5 text-sm text-[#8995a9]">正在加载世界观…</Panel> : preview}</aside>
       </div>
-      <StatusBanner loading={loading} error={error} ok={ok} />
-      <Field label="名称" value={name} onChange={setName} />
-      <Field label="摘要" value={summary} onChange={setSummary} multiline rows={4} />
-      <Field label="硬性规则" value={rule} onChange={setRule} multiline />
-      <Button disabled={busy} onClick={() => void saveAndConfirm()}>
-        {busy ? "保存中…" : "保存"}
-      </Button>
-    </section>
-  );
+    </div>
+  </div>;
 }

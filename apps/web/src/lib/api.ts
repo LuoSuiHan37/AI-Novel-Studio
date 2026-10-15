@@ -154,14 +154,14 @@ export async function api<T>(
   } else {
     const prefs = getGlobalLlmPrefs();
     if (prefs) {
-      if (prefs.provider) merged.set("X-LLM-Provider", prefs.provider);
-      if (prefs.model) merged.set("X-LLM-Model", prefs.model);
-      if (prefs.baseUrl) merged.set("X-LLM-Base-Url", prefs.baseUrl);
-      if (prefs.reviewProvider) merged.set("X-Review-Provider", prefs.reviewProvider);
-      if (prefs.reviewModel) merged.set("X-Review-Model", prefs.reviewModel);
-      if (prefs.reviewBaseUrl) merged.set("X-Review-Base-Url", prefs.reviewBaseUrl);
+      if (prefs.provider && !merged.has("X-LLM-Provider")) merged.set("X-LLM-Provider", prefs.provider);
+      if (prefs.model && !merged.has("X-LLM-Model")) merged.set("X-LLM-Model", prefs.model);
+      if (prefs.baseUrl && !merged.has("X-LLM-Base-Url")) merged.set("X-LLM-Base-Url", prefs.baseUrl);
+      if (prefs.reviewProvider && !merged.has("X-Review-Provider")) merged.set("X-Review-Provider", prefs.reviewProvider);
+      if (prefs.reviewModel && !merged.has("X-Review-Model")) merged.set("X-Review-Model", prefs.reviewModel);
+      if (prefs.reviewBaseUrl && !merged.has("X-Review-Base-Url")) merged.set("X-Review-Base-Url", prefs.reviewBaseUrl);
     }
-    const key = getStoredLlmKey(prefs?.provider);
+    const key = getStoredLlmKey(merged.get("X-LLM-Provider") || prefs?.provider);
     if (key && !merged.has("X-LLM-Api-Key")) merged.set("X-LLM-Api-Key", key);
     const reviewKey = getStoredLlmKey(prefs?.reviewProvider);
     if (reviewKey && !merged.has("X-Review-Api-Key")) merged.set("X-Review-Api-Key", reviewKey);

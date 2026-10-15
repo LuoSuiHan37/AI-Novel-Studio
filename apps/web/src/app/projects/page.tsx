@@ -3,443 +3,52 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Field, StatusBanner } from "@/components/ui-bits";
+import { ArrowLeft, BookOpen, Check, ChevronDown, ChevronRight, FileText, Link2, LoaderCircle, Save, Search, Sparkles, Users, XCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui-bits";
 import { api, ApiError } from "@/lib/api";
 import { getGenreCategory, genreOptionLabel, NOVEL_GENRES, type GenreCategory } from "@/lib/genres";
-import { genreLabel, pipelineStageLabel } from "@/lib/labels";
 import type { Project, ResearchSession } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+type Step = 1 | 2 | 3;
+type Pitch = { premise: string; theme: string; logline: string; synopsis: string; reading_tags: string[]; content_tags: string[]; protagonist_names: string[] };
+
+const DRAFT_KEY = "ai-novel-studio.create-book-draft";
+const steps: Array<[Step, string]> = [[1, "创作方向"], [2, "书名与简介"], [3, "确认创建"]];
+
+function Cover({ title }: { title: string }) { return <div className="relative flex aspect-[3/4] w-full max-w-[230px] items-center justify-center overflow-hidden rounded-[10px] border border-[#d5dfed] bg-[linear-gradient(145deg,#f7faff_5%,#dce8f8_52%,#adc2e3)] shadow-[0_10px_22px_rgba(47,76,125,.15)]"><div className="absolute inset-3 rounded-[7px] border border-white/70" /><div className="relative px-5 text-center font-serif text-[23px] font-semibold leading-tight text-[#21365d]">{title || "未命名作品"}<span className="mx-auto mt-4 block h-px w-12 bg-[#748aaf]" /><small className="mt-3 block font-sans text-[10px] font-normal tracking-[.18em] text-[#7484a0]">AI 小说工作室</small></div></div>; }
+function Panel({ children, className }: { children: React.ReactNode; className?: string }) { return <section className={cn("rounded-[12px] border border-[#e1e8f2] bg-white shadow-[0_8px_24px_rgba(35,55,95,.045)]", className)}>{children}</section>; }
+function GenreCards({ category, genre, onSelect, expanded, onExpand }: { category: GenreCategory; genre: string; onSelect: (value: string) => void; expanded: boolean; onExpand: () => void }) { const options = NOVEL_GENRES[category]; const visible = expanded ? options : options.slice(0, 8); return <div className="space-y-3"><div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{visible.map((option) => <button type="button" key={option.value} aria-pressed={genre === option.value} onClick={() => onSelect(option.value)} className={cn("flex min-h-12 items-center justify-between rounded-[8px] border px-3 text-left text-[13px] font-medium transition", genre === option.value ? "border-[#2563eb] bg-[#edf3ff] text-[#2563eb] shadow-[inset_0_0_0_1px_#2563eb]" : "border-[#dbe3ef] text-[#53627a] hover:border-[#9db9ee] hover:bg-[#f8faff]")}>{option.label}{genre === option.value ? <Check className="size-4" /> : null}</button>)}</div>{options.length > 8 ? <button type="button" onClick={onExpand} className="mx-auto flex items-center gap-1 text-sm font-semibold text-[#2563eb]">{expanded ? "收起题材" : "展开全部题材"}<ChevronDown className={cn("size-4 transition", expanded && "rotate-180")} /></button> : null}</div>; }
+function SummaryRow({ icon: Icon, label, value, good }: { icon: typeof FileText; label: string; value: string; good?: boolean }) { return <div className="flex items-center gap-3 py-2"><Icon className="size-4 text-[#6f83a4]" /><span className="flex-1 text-sm text-[#657590]">{label}</span><strong className={cn("max-w-[170px] truncate text-right text-sm", good === false ? "text-[#a1aabd]" : "text-[#25365a]")}>{value}</strong></div>; }
 
 export default function ProjectsPage() {
   const router = useRouter();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [genre, setGenre] = useState("werewolf_romance");
-  const [genreCategory, setGenreCategory] = useState<GenreCategory>(() => getGenreCategory("werewolf_romance"));
-  const [language, setLanguage] = useState("zh-CN");
-  const [chapterCountTarget, setChapterCountTarget] = useState("120");
-  const [title, setTitle] = useState("");
-  const [brief, setBrief] = useState("");
-  const [pitch, setPitch] = useState<{
-    premise: string;
-    theme: string;
-    logline: string;
-    synopsis: string;
-    reading_tags: string[];
-    content_tags: string[];
-    protagonist_names: string[];
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [ok, setOk] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [suggesting, setSuggesting] = useState(false);
-  const [titleAvailable, setTitleAvailable] = useState(false);
-  const [distillUrl, setDistillUrl] = useState("");
-  const [distillProjectId, setDistillProjectId] = useState<string | null>(null);
-  const [distillSession, setDistillSession] = useState<ResearchSession | null>(null);
-  const [distilling, setDistilling] = useState(false);
-  const distillationCompleted = Boolean(
-    distillSession?.status === "completed" &&
-      distillSession.active_task?.status !== "error" &&
-      distillSession.stages.length > 0 &&
-      distillSession.stages.every((stage) => stage.status === "done"),
-  );
-  const distillationFailed = distillSession?.status === "failed" || distillSession?.active_task?.status === "error";
+  const [step, setStep] = useState<Step>(1); const [genre, setGenre] = useState("werewolf_romance"); const [genreCategory, setGenreCategory] = useState<GenreCategory>(() => getGenreCategory("werewolf_romance")); const [language, setLanguage] = useState("zh-CN"); const [targetReader, setTargetReader] = useState<GenreCategory>("female"); const [chapterCountTarget, setChapterCountTarget] = useState("120"); const [brief, setBrief] = useState(""); const [title, setTitle] = useState(""); const [pitch, setPitch] = useState<Pitch | null>(null); const [expanded, setExpanded] = useState(false); const [researchOpen, setResearchOpen] = useState(false); const [distillUrl, setDistillUrl] = useState(""); const [distillProjectId, setDistillProjectId] = useState<string | null>(null); const [distillSession, setDistillSession] = useState<ResearchSession | null>(null); const [distilling, setDistilling] = useState(false); const [suggesting, setSuggesting] = useState(false); const [saving, setSaving] = useState(false); const [titleAvailable, setTitleAvailable] = useState<boolean | null>(null); const [error, setError] = useState<string | null>(null); const [message, setMessage] = useState<string | null>(null); const [draftLoaded, setDraftLoaded] = useState(false);
+  const distillationCompleted = Boolean(distillSession?.status === "completed" && distillSession.stages.length > 0 && distillSession.stages.every((stage) => stage.status === "done")); const distillationFailed = distillSession?.status === "failed" || distillSession?.active_task?.status === "error"; const selectedGenre = genreOptionLabel(genre); const briefCount = brief.length;
 
-  function resetGeneratedPackage() {
-    setTitle("");
-    setPitch(null);
-    setTitleAvailable(false);
-  }
+  useEffect(() => { if (new URLSearchParams(window.location.search).get("create") !== "1") router.replace("/"); }, [router]);
 
-  function selectGenre(value: string) {
-    setGenre(value);
-    setTitle("");
-    setPitch(null);
-    setTitleAvailable(false);
-  }
+  // Hydrating from localStorage is an intentional external-store synchronization.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { try { const raw = window.localStorage.getItem(DRAFT_KEY); if (raw) { const draft = JSON.parse(raw) as Partial<Record<string, unknown>>; if (typeof draft.genre === "string") { setGenre(draft.genre); setGenreCategory(getGenreCategory(draft.genre)); } if (draft.language === "zh-CN" || draft.language === "en") setLanguage(draft.language); if (draft.targetReader === "male" || draft.targetReader === "female") setTargetReader(draft.targetReader); if (typeof draft.chapterCountTarget === "string") setChapterCountTarget(draft.chapterCountTarget); if (typeof draft.brief === "string") setBrief(draft.brief); if (typeof draft.title === "string") setTitle(draft.title); if (draft.pitch && typeof draft.pitch === "object") setPitch(draft.pitch as Pitch); if (draft.step === 1 || draft.step === 2 || draft.step === 3) setStep(draft.step); if (typeof draft.distillUrl === "string") setDistillUrl(draft.distillUrl); if (typeof draft.distillProjectId === "string") setDistillProjectId(draft.distillProjectId); if (draft.distillSession && typeof draft.distillSession === "object") setDistillSession(draft.distillSession as ResearchSession); } } catch { window.localStorage.removeItem(DRAFT_KEY); } finally { setDraftLoaded(true); } }, []);
+  useEffect(() => { if (!draftLoaded) return; window.localStorage.setItem(DRAFT_KEY, JSON.stringify({ step, genre, language, targetReader, chapterCountTarget, brief, title, pitch, distillUrl, distillProjectId, distillSession })); }, [draftLoaded, step, genre, language, targetReader, chapterCountTarget, brief, title, pitch, distillUrl, distillProjectId, distillSession]);
 
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      setProjects(await api<Project[]>("/projects"));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "加载失败");
-    } finally {
-      setLoading(false);
-    }
-  }
+  function clearGenerated() { setTitle(""); setPitch(null); setTitleAvailable(null); }
+  function selectGenre(value: string) { setGenre(value); clearGenerated(); }
+  function selectCategory(category: GenreCategory) { setGenreCategory(category); setTargetReader(category); const currentValid = NOVEL_GENRES[category].some((item) => item.value === genre); if (!currentValid) { setGenre(""); clearGenerated(); setMessage("目标读者已切换，请重新选择对应题材。"); } else setMessage(null); }
+  function showError(value: string) { setError(value); setMessage(null); }
+  function nextFromDirection() { if (!genre) { showError("请选择一个小说题材后继续"); return; } setError(null); setStep(2); }
+  function nextFromPitch() { if (!title.trim()) { showError("请填写书名后继续"); return; } if (!pitch?.synopsis?.trim()) { showError("请填写简介后继续"); return; } setError(null); setStep(3); }
 
-  useEffect(() => {
-    void load();
-  }, []);
+  async function suggestTitle() { setSuggesting(true); setError(null); setMessage(null); try { const result = await api<Pitch & { title: string; available: boolean }>("/projects/title-suggestion", { method: "POST", body: JSON.stringify({ genre, target_platform: "alphanovel", language, brief, target_reader: targetReader, research_profile: distillSession?.artifacts.find((item) => item.id === "profile")?.content || null }) }); setTitle(result.title); setPitch({ premise: result.premise, theme: result.theme, logline: result.logline, synopsis: result.synopsis, reading_tags: result.reading_tags || [], content_tags: result.content_tags || [], protagonist_names: result.protagonist_names || [] }); setTitleAvailable(result.available); if (!result.available) setMessage("这个书名已存在，可以编辑后再确认创建。"); } catch (err) { showError(err instanceof ApiError ? err.message : "AI 生成失败，请重试"); } finally { setSuggesting(false); } }
+  async function executeDistillationStage(projectId: string, stageId: string) { let polling = true; const timer = window.setInterval(() => { if (polling) void api<ResearchSession>(`/projects/${projectId}/research`).then(setDistillSession).catch(() => undefined); }, 800); try { return await api<ResearchSession>(`/projects/${projectId}/research/stages/${stageId}`, { method: "POST", projectId, body: JSON.stringify({ status: "done", execute: true }) }); } finally { polling = false; window.clearInterval(timer); } }
+  async function startDistillation() { if (!distillUrl.trim()) { showError("请先输入参考作品链接"); return; } setDistilling(true); setError(null); setMessage(null); try { let projectId = distillProjectId; if (!projectId) { const draft = await api<Project>("/projects", { method: "POST", body: JSON.stringify({ title: `待生成书名-${selectedGenre}-${Date.now().toString(36)}`, genre: genre || "werewolf_romance", tropes: genre ? [genre] : [], target_platform: "alphanovel", language }) }); projectId = draft.id; setDistillProjectId(projectId); } let session = await api<ResearchSession>(`/projects/${projectId}/research/sources`, { method: "POST", projectId, body: JSON.stringify({ title: "参考小说", source_type: "fanqie_url", url: distillUrl.trim() }) }); session = await api<ResearchSession>(`/projects/${projectId}/research/start`, { method: "POST", projectId }); setDistillSession(session); while (true) { const stage = session.stages.find((item) => item.status === "running"); if (!stage) break; session = await executeDistillationStage(projectId, stage.id); setDistillSession(session); if (session.status === "failed" || session.active_task?.status === "error") throw new Error(session.active_task?.message || `研究阶段“${stage.title}”失败`); } setDistillSession(session); if (session.status !== "completed") throw new Error("参考研究尚未完成"); setMessage("参考研究已完成，可继续生成书名和简介。"); } catch (err) { showError(err instanceof Error ? err.message : "参考研究失败，请重试"); } finally { setDistilling(false); } }
+  async function createProject() { if (!title.trim() || !pitch?.synopsis?.trim()) { showError("请先完成书名和简介"); return; } setSaving(true); setError(null); setMessage(null); try { let projectId = distillProjectId; if (!projectId) { const draft = await api<Project>("/projects", { method: "POST", body: JSON.stringify({ title: `待生成书名-${selectedGenre}-${Date.now().toString(36)}`, genre, tropes: [genre], target_platform: "alphanovel", language, chapter_count_target: Number(chapterCountTarget) }) }); projectId = draft.id; } if (distillationCompleted && projectId) await api(`/projects/${projectId}/research/inject/approve`, { method: "POST", projectId, body: JSON.stringify({ confirmed_by: "studio-user", note: "Approved during book creation" }) }); const created = await api<Project>(`/projects/${projectId}`, { method: "PATCH", projectId, body: JSON.stringify({ title: title.trim(), genre, language, chapter_count_target: Number(chapterCountTarget), tone: genre.replaceAll("_", " ") }) }); await api(`/projects/${created.id}/story`, { method: "PATCH", projectId: created.id, body: JSON.stringify({ premise: pitch.premise, theme: pitch.theme, tone: genre.replaceAll("_", " "), narrative_style: "close third serial", target_word_count: 80000, chapter_word_count: language === "zh-CN" ? 2500 : 1800, romance_level: "high", violence_level: "medium", heat_level: "medium", tropes: [genre], logline: pitch.logline, synopsis: pitch.synopsis, target_reader: targetReader, reading_tags: pitch.reading_tags, content_tags: pitch.content_tags, protagonist_names: pitch.protagonist_names }) }); window.localStorage.removeItem(DRAFT_KEY); setMessage("作品创建成功，正在打开概览…"); router.push(`/projects/${created.id}`); } catch (err) { showError(err instanceof ApiError ? err.message : "创建失败，请检查网络后重试"); } finally { setSaving(false); } }
+  function leave() { if (window.confirm("当前创建内容已暂存。返回作品库后仍可从“新建小说”继续，是否返回？")) router.push("/"); }
 
-  async function createProject() {
-    if (!distillProjectId || !distillationCompleted) {
-      setError("请先完成参考小说蒸馏");
-      return;
-    }
-    if (!title.trim() || !pitch) {
-      setError("请先生成书名和小说介绍");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      await api(`/projects/${distillProjectId}/research/inject/approve`, {
-        method: "POST",
-        projectId: distillProjectId,
-        body: JSON.stringify({ confirmed_by: "studio-user", note: "Approved while creating the novel" }),
-      });
-      const created = await api<Project>(`/projects/${distillProjectId}`, {
-        method: "PATCH",
-        projectId: distillProjectId,
-        body: JSON.stringify({
-          title,
-          genre,
-          language,
-          chapter_count_target: Number(chapterCountTarget),
-          tone: genre.replaceAll("_", " "),
-        }),
-      });
-      await api(`/projects/${created.id}/story`, {
-        method: "PATCH",
-        projectId: created.id,
-        body: JSON.stringify({
-          premise: pitch.premise,
-          theme: pitch.theme,
-          tone: genre.replaceAll("_", " "),
-          narrative_style: "close third serial",
-          target_word_count: 80000,
-          chapter_word_count: language === "zh-CN" ? 2500 : 1800,
-          romance_level: "high",
-          violence_level: "medium",
-          heat_level: "medium",
-          tropes: [genre],
-          logline: pitch.logline,
-          synopsis: pitch.synopsis,
-          target_reader: genreCategory === "female" ? "female" : "male",
-          reading_tags: pitch.reading_tags,
-          content_tags: pitch.content_tags,
-          protagonist_names: pitch.protagonist_names,
-        }),
-      });
-      setOk("项目已创建");
-      router.push(`/projects/${created.id}/story`);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "创建失败");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function suggestTitle() {
-    if (!distillSession || !distillationCompleted) {
-      setError("请先完成参考小说蒸馏，再生成书名和简介");
-      return;
-    }
-    setSuggesting(true);
-    setError(null);
-    try {
-      const result = await api<{
-        title: string;
-        available: boolean;
-        premise: string;
-        theme: string;
-        logline: string;
-        synopsis: string;
-        reading_tags: string[];
-        content_tags: string[];
-        protagonist_names: string[];
-      }>("/projects/title-suggestion", {
-        method: "POST",
-        body: JSON.stringify({
-          genre,
-          target_platform: "alphanovel",
-          language,
-          brief,
-          research_profile: distillSession.artifacts.find((item) => item.id === "profile")?.content || null,
-        }),
-      });
-      setTitle(result.title);
-      setPitch({
-        premise: result.premise,
-        theme: result.theme,
-        logline: result.logline,
-        synopsis: result.synopsis,
-        reading_tags: result.reading_tags || [],
-        content_tags: result.content_tags || [],
-        protagonist_names: result.protagonist_names || [],
-      });
-      setTitleAvailable(result.available);
-      if (!result.available) setError(`AI 生成的书名“${result.title}”已存在，请重新生成。`);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "AI 书名和小说介绍生成失败");
-    } finally {
-      setSuggesting(false);
-    }
-  }
-
-  async function executeDistillationStage(projectId: string, stageId: string) {
-    let polling = true;
-    const poll = async () => {
-      if (!polling) return;
-      try {
-        const live = await api<ResearchSession>(`/projects/${projectId}/research`);
-        setDistillSession(live);
-      } catch {
-        // The stage request remains the source of truth; transient polling
-        // failures must not turn a successful stage into a false failure.
-      }
-    };
-    const timer = window.setInterval(() => void poll(), 800);
-    try {
-      return await api<ResearchSession>(`/projects/${projectId}/research/stages/${stageId}`, {
-        method: "POST",
-        projectId,
-        body: JSON.stringify({ status: "done", execute: true }),
-      });
-    } finally {
-      polling = false;
-      window.clearInterval(timer);
-    }
-  }
-
-  async function startDistillation() {
-    if (!distillUrl.trim()) {
-      setError("请先输入番茄小说链接");
-      return;
-    }
-    setDistilling(true);
-    setError(null);
-    try {
-      const project = await api<Project>("/projects", {
-        method: "POST",
-        body: JSON.stringify({
-          // Distillation starts from a temporary project. It must be unique so
-          // a failed or retried run cannot collide with an older draft.
-          title: `待生成书名-${genreOptionLabel(genre)}-${Date.now().toString(36)}`,
-          genre,
-          tropes: [genre],
-          target_platform: "alphanovel",
-          language,
-        }),
-      });
-      setDistillProjectId(project.id);
-      let session = await api<ResearchSession>(`/projects/${project.id}/research/sources`, {
-        method: "POST",
-        projectId: project.id,
-        body: JSON.stringify({ title: "番茄参考小说", source_type: "fanqie_url", url: distillUrl.trim() }),
-      });
-      session = await api<ResearchSession>(`/projects/${project.id}/research/start`, { method: "POST", projectId: project.id });
-      setDistillSession(session);
-      while (true) {
-        const stage = session.stages.find((item) => item.status === "running");
-        if (!stage) break;
-        session = await executeDistillationStage(project.id, stage.id);
-        setDistillSession(session);
-        if (session.status === "failed" || session.active_task?.status === "error") {
-          throw new Error(session.active_task?.message || `蒸馏阶段“${stage.title}”失败`);
-        }
-      }
-      if (session.status !== "completed" || !session.stages.every((stage) => stage.status === "done")) {
-        throw new Error("蒸馏尚未完成");
-      }
-      if (session.stages.some((stage) => stage.id === "inject" && stage.status === "running")) {
-        session = await executeDistillationStage(project.id, "inject");
-      }
-      setDistillSession(session);
-      setOk("参考小说蒸馏和原创创作包已完成，确认创建新书后会写入角色、世界观和分卷");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "蒸馏执行失败");
-    } finally {
-      setDistilling(false);
-    }
-  }
-
-  return (
-    <section className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">我的书籍</h1>
-          <p className="text-sm text-muted-foreground">每本书拥有独立的设定、目录、章节、故事记忆和爆款研究。</p>
-        </div>
-        {projects.length ? (
-          <Link href="/research" className={buttonVariants({ variant: "outline", size: "sm" })}>
-            蒸馏参考小说
-          </Link>
-        ) : null}
-      </div>
-      <StatusBanner loading={loading} error={error} ok={ok} />
-      <div className="max-w-xl space-y-2 rounded-lg border bg-muted/20 p-4">
-        <h2 className="font-medium">创建新书</h2>
-        <div className="space-y-2 rounded-md border border-dashed bg-background p-3">
-          <div>
-            <p className="text-sm font-medium">第一步：蒸馏番茄参考小说</p>
-            <p className="mt-1 text-xs text-muted-foreground">先选择题材并输入番茄小说链接，提取结构、节奏、文案和表达规律。</p>
-          </div>
-          <div className="flex gap-2">
-            <input
-              className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm"
-              placeholder="粘贴番茄小说链接"
-              value={distillUrl}
-              disabled={distilling || Boolean(distillSession)}
-              onChange={(event) => setDistillUrl(event.target.value)}
-            />
-            <Button variant="outline" disabled={distilling || distillationCompleted} onClick={() => void startDistillation()}>
-              {distilling ? "蒸馏执行中…" : distillationCompleted ? "已完成蒸馏" : "开始蒸馏"}
-            </Button>
-          </div>
-          {distillSession ? (
-            <div className="space-y-1 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-              <p>
-                蒸馏进度：{distillationCompleted ? "100%" : `${distillSession.progress}%`} · {distillationCompleted ? "已完成" : distillationFailed ? "失败" : "正在执行"}
-              </p>
-              {distillationFailed ? (
-                <p className="text-destructive">失败：{distillSession.active_task?.message || "未知错误"}</p>
-              ) : distillSession.active_task?.source_title ? (
-                <p>
-                  当前小说：{distillSession.active_task.source_title}
-                  {distillSession.active_task.sampled_chapter_numbers?.length ? (
-                    <> · 当前采样章节：第 {distillSession.active_task.sampled_chapter_numbers.join("、")} 章</>
-                  ) : null}
-                  {distillSession.active_task.status === "completed" ? " · 本次分析已成功返回" : " · 正在分析"}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-          <Field
-            label="核心创意（选填；填写后简介会更贴合你的故事）"
-          value={brief}
-          onChange={(value) => {
-            setBrief(value);
-            resetGeneratedPackage();
-          }}
-          multiline
-          rows={3}
-          />
-        <label className="block space-y-1">
-          <span className="text-xs font-medium text-muted-foreground">计划总章节数</span>
-          <input
-            className="w-40 rounded-md border border-input bg-background px-3 py-2 text-sm"
-            type="number"
-            min={1}
-            max={5000}
-            value={chapterCountTarget}
-            onChange={(event) => setChapterCountTarget(event.target.value)}
-          />
-          <span className="ml-2 text-xs text-muted-foreground">创建后将作为生成和发布的硬约束</span>
-        </label>
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="block min-w-40 space-y-1">
-            <span className="text-xs font-medium text-muted-foreground">小说语言</span>
-            <select
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              value={language}
-              onChange={(event) => {
-                setLanguage(event.target.value);
-                resetGeneratedPackage();
-              }}
-            >
-              <option value="zh-CN">简体中文</option>
-              <option value="en">English</option>
-            </select>
-          </label>
-          <div className="min-w-60 flex-1 space-y-2">
-            <span className="text-xs font-medium text-muted-foreground">小说类型</span>
-            <div className="flex gap-2" role="tablist" aria-label="小说类型大类">
-              {(["male", "female"] as GenreCategory[]).map((category) => (
-                <button
-                  key={category}
-                  type="button"
-                  role="tab"
-                  aria-selected={genreCategory === category}
-                  className={`rounded-full px-4 py-1.5 text-sm transition ${
-                    genreCategory === category ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/70"
-                  }`}
-                  onClick={() => {
-                    setGenreCategory(category);
-                    selectGenre(NOVEL_GENRES[category][0].value);
-                  }}
-                >
-                  {category === "male" ? "男频" : "女频"}
-                </button>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2" role="listbox" aria-label={`${genreCategory === "male" ? "男频" : "女频"}题材`}>
-              {NOVEL_GENRES[genreCategory].map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="option"
-                  aria-selected={genre === option.value}
-                  className={`rounded-full border px-3 py-1.5 text-xs transition ${
-                    genre === option.value
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border bg-background text-muted-foreground hover:border-primary/60 hover:text-foreground"
-                  }`}
-                  onClick={() => selectGenre(option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">当前选择：{genreOptionLabel(genre)}</p>
-          </div>
-          <Button variant="outline" disabled={suggesting || !distillationCompleted} onClick={() => void suggestTitle()}>
-            {suggesting ? "生成中…" : pitch ? "重新生成书名和简介" : "第二步：生成书名和简介"}
-          </Button>
-        </div>
-        <div className="mt-2 flex flex-wrap items-end gap-2">
-          <div className="flex-1">
-            <Field label="AI 生成的书名" value={title} onChange={() => undefined} readOnly />
-          </div>
-          <Button disabled={saving || !title.trim() || !pitch || !distillProjectId} onClick={() => void createProject()}>
-            {saving ? "创建中…" : "确认创作包并创建新书"}
-          </Button>
-        </div>
-        {title && !titleAvailable ? (
-          <p className="text-xs text-amber-600">书名可能与已有书籍重复；如确认继续创建，请直接点击上方按钮。</p>
-        ) : null}
-        {pitch ? (
-          <div className="space-y-2 border-t pt-3">
-            <p className="text-sm font-medium">AI 生成的小说介绍（创建后仍可修改）</p>
-            <Field label="Premise（故事前提）" value={pitch.premise} onChange={(premise) => setPitch({ ...pitch, premise })} multiline rows={3} />
-            <Field label="Theme（主题）" value={pitch.theme} onChange={(theme) => setPitch({ ...pitch, theme })} />
-            <Field label="Logline（一句话钩子）" value={pitch.logline} onChange={(logline) => setPitch({ ...pitch, logline })} />
-            <Field label="Synopsis（读者向简介）" value={pitch.synopsis} onChange={(synopsis) => setPitch({ ...pitch, synopsis })} multiline rows={5} />
-            <Field label="自动填充的阅读标签" value={pitch.reading_tags.join(", ")} onChange={(value) => setPitch({ ...pitch, reading_tags: value.split(",").map((item) => item.trim()).filter(Boolean) })} />
-            <Field label="自动填充的内容标签" value={pitch.content_tags.join(", ")} onChange={(value) => setPitch({ ...pitch, content_tags: value.split(",").map((item) => item.trim()).filter(Boolean) })} />
-            <Field label="自动填充的主角名" value={pitch.protagonist_names.join(", ")} onChange={(value) => setPitch({ ...pitch, protagonist_names: value.split(",").map((item) => item.trim()).filter(Boolean) })} />
-          </div>
-        ) : null}
-      </div>
-      <ul className="divide-y rounded-lg border">
-        {projects.map((project) => (
-          <li key={project.id} className="flex items-center justify-between px-4 py-3">
-            <div>
-              <div className="font-medium">{project.title}</div>
-              <div className="text-xs text-muted-foreground">
-                {genreLabel(project.genre)} · {pipelineStageLabel(project.current_stage)}
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <Link className="text-sm underline" href={`/projects/${project.id}/chapters`}>
-                打开目录
-              </Link>
-              <Link className={buttonVariants({ variant: "ghost", size: "sm" })} href={`/projects/${project.id}/story`}>
-                小说介绍
-              </Link>
-              <Link className={buttonVariants({ variant: "outline", size: "sm" })} href={`/projects/${project.id}/research`}>
-                爆款研究
-              </Link>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
+  const preview = <Panel className="p-5 lg:sticky lg:top-5"><h2 className="text-[18px] font-bold text-[#172443]">创作预览</h2><div className="my-4 flex justify-center"><Cover title={title} /></div><div className="flex flex-wrap justify-center gap-2"><span className="rounded-full bg-[#edf3ff] px-3 py-1 text-xs font-semibold text-[#2563eb]">{selectedGenre || "未选择题材"}</span><span className="rounded-full bg-[#f1f4f8] px-3 py-1 text-xs text-[#566782]">{targetReader === "male" ? "男频" : "女频"}</span><span className="rounded-full bg-[#f1f4f8] px-3 py-1 text-xs text-[#566782]">{language === "zh-CN" ? "中文" : "English"}</span></div><div className="mt-5 divide-y divide-[#edf1f6]"><SummaryRow icon={FileText} label="计划章节数" value={`${chapterCountTarget || "—"} 章`} /><SummaryRow icon={Sparkles} label="核心创意" value={brief ? `已填写 · ${briefCount} 字` : "未填写"} good={Boolean(brief)} /><SummaryRow icon={Search} label="参考研究" value={distillationCompleted ? "已完成" : distillSession ? "处理中" : "未添加"} good={distillationCompleted} /></div></Panel>;
+  return <div className="mx-auto w-full max-w-[1360px] pb-12"><header className="flex min-h-[72px] items-center justify-between gap-4 border-b border-[#e4eaf3]"><div className="flex items-center gap-2 text-sm text-[#7d8aa1]"><Link href="/" className="hover:text-[#2563eb]">作品库</Link><span>/</span><strong className="text-[#172443]">创建新书</strong></div><button type="button" onClick={leave} className="inline-flex h-10 items-center gap-2 rounded-[8px] border border-[#cbd8ea] bg-white px-4 text-sm font-semibold text-[#526782] shadow-sm hover:border-[#8eace0] hover:text-[#2563eb]"><ArrowLeft className="size-4" />返回作品库</button></header><div className="space-y-6 pt-8"><div><h1 className="font-serif text-[36px] font-semibold tracking-[-.04em] text-[#101c3b]">创建新书</h1><p className="mt-2 text-[16px] text-[#718099]">从一个创意开始，构建你的下一部作品。</p></div><nav aria-label="创建步骤" className="mx-auto flex max-w-[900px] items-center"><div className="hidden h-0.5 flex-1 bg-[#d8e2f1] sm:block" />{steps.map(([number, label], index) => <div key={number} className="flex flex-1 items-center"><div className={cn("flex size-10 shrink-0 items-center justify-center rounded-full text-base font-bold", step >= number ? "bg-[#2563eb] text-white shadow-[0_5px_12px_rgba(37,99,235,.2)]" : "bg-[#e8edf5] text-[#718099]")}>{step > number ? <Check className="size-5" /> : number}</div><span className={cn("ml-2 whitespace-nowrap text-sm font-semibold", step === number ? "text-[#2563eb]" : "text-[#718099]")}>{label}</span>{index < steps.length - 1 ? <div className={cn("mx-4 h-0.5 flex-1", step > number ? "bg-[#2563eb]" : "bg-[#d8e2f1]")} /> : null}</div>)}<div className="hidden h-0.5 flex-1 bg-[#d8e2f1] sm:block" /></nav>{error ? <div className="flex items-start gap-2 rounded-[8px] border border-[#f0caca] bg-[#fff7f7] px-4 py-3 text-sm text-[#b54d4d]"><XCircle className="mt-0.5 size-4 shrink-0" />{error}</div> : null}{message ? <div className="flex items-start gap-2 rounded-[8px] border border-[#c6eadc] bg-[#f4fcf8] px-4 py-3 text-sm text-[#167957]"><Check className="mt-0.5 size-4 shrink-0" />{message}</div> : null}<div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.9fr)_minmax(300px,.9fr)]"><Panel className="min-w-0"><div className="border-b border-[#edf1f6] px-6 py-5"><h2 className="text-[19px] font-bold text-[#172443]">{steps[step - 1][1]}</h2><p className="mt-1 text-sm text-[#7d8aa1]">{step === 1 ? "先确定故事的方向，所有填写内容都会保留。" : step === 2 ? "手动填写，或让 AI 生成一个可编辑候选。" : "确认后才会创建正式作品，不会重复创建。"}</p></div><div className="space-y-6 p-6">{step === 1 ? <><Field label="核心创意（选填）" value={brief} onChange={(value) => { setBrief(value); setMessage(null); }} multiline rows={4} hint={`${briefCount}/500 字 · 填写后 AI 生成结果会更贴合你的故事`} /><div className="grid gap-5 md:grid-cols-2"><div><span className="mb-2 block text-[13px] font-semibold text-[#25365a]">目标读者</span><div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => selectCategory("male")} className={cn("h-11 rounded-[8px] border text-sm font-semibold", targetReader === "male" ? "border-[#2563eb] bg-[#2563eb] text-white" : "border-[#d6dfec] text-[#526782]")}><Users className="mr-2 inline size-4" />男频</button><button type="button" onClick={() => selectCategory("female")} className={cn("h-11 rounded-[8px] border text-sm font-semibold", targetReader === "female" ? "border-[#2563eb] bg-[#2563eb] text-white" : "border-[#d6dfec] text-[#526782]")}><Users className="mr-2 inline size-4" />女频</button></div></div><label className="block space-y-2"><span className="text-[13px] font-semibold text-[#25365a]">小说语言</span><select value={language} onChange={(e) => { setLanguage(e.target.value); clearGenerated(); }} className="h-11 w-full rounded-[8px] border border-[#d6dfec] bg-white px-3.5 text-sm text-[#172443] outline-none focus:border-[#7ba3ff]"><option value="zh-CN">简体中文</option><option value="en">English</option></select></label></div><div><span className="mb-2 block text-[13px] font-semibold text-[#25365a]">小说题材</span><GenreCards category={genreCategory} genre={genre} onSelect={selectGenre} expanded={expanded} onExpand={() => setExpanded((v) => !v)} />{!genre ? <p className="mt-2 text-xs text-[#b36a00]">请选择当前目标读者对应的题材。</p> : null}</div><label className="block space-y-2"><span className="text-[13px] font-semibold text-[#25365a]">计划章节数</span><input type="number" min={1} max={5000} value={chapterCountTarget} onChange={(e) => setChapterCountTarget(e.target.value)} className="h-11 w-44 rounded-[8px] border border-[#d6dfec] px-3.5 text-sm outline-none focus:border-[#7ba3ff]" /><span className="ml-3 text-xs text-[#8491a7]">1–5000 章，创建后用于章节规划与发布检查</span></label><div className="overflow-hidden rounded-[8px] border border-[#dbe3ef]"><button type="button" onClick={() => setResearchOpen((v) => !v)} className="flex w-full items-center justify-between px-4 py-3 text-left"><span className="flex items-center gap-2 text-sm font-semibold text-[#31466e]"><FileText className="size-4 text-[#2563eb]" />参考作品研究 <span className="rounded-full bg-[#f1f4f8] px-2 py-0.5 text-[11px] font-normal text-[#7d8aa1]">可选</span></span><ChevronDown className={cn("size-4 transition", researchOpen && "rotate-180")} /></button>{researchOpen ? <div className="space-y-3 border-t border-[#edf1f6] bg-[#fbfcfe] p-4"><p className="text-xs leading-5 text-[#7d8aa1]">分析结构与节奏，为原创创作提供参考。未添加参考作品也可以继续。</p><div className="flex gap-2"><div className="relative flex-1"><Link2 className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#9aa6b8]" /><input className="h-10 w-full rounded-[8px] border border-[#d6dfec] pl-9 pr-3 text-sm" placeholder="粘贴参考作品链接" value={distillUrl} disabled={distilling || Boolean(distillationCompleted)} onChange={(e) => setDistillUrl(e.target.value)} /></div><Button variant="outline" disabled={distilling || distillationCompleted} onClick={() => void startDistillation()}>{distilling ? <LoaderCircle className="size-4 animate-spin" /> : <Search className="size-4" />}{distillationCompleted ? "已完成" : "分析"}</Button></div>{distillSession ? <p className={cn("text-xs", distillationFailed ? "text-[#b54d4d]" : distillationCompleted ? "text-[#16855f]" : "text-[#718099]")}>{distillationFailed ? `失败：${distillSession.active_task?.message || "请重试"}` : distillationCompleted ? "研究已完成，结果可用于 AI 生成。" : `研究进度 ${distillSession.progress}% · 可继续等待`}</p> : null}</div> : null}</div><div className="flex justify-end border-t border-[#edf1f6] pt-5"><Button className="h-11 bg-[#2563eb] px-5 hover:bg-[#1d4ed8]" onClick={nextFromDirection}>下一步：书名与简介 <ChevronRight className="size-4" /></Button></div></> : null}{step === 2 ? <><div className="flex items-center justify-between gap-3"><p className="text-sm text-[#718099]">可以手动填写，也可以生成候选后继续编辑。</p><Button variant="outline" className="border-[#8db1ff] text-[#2563eb]" disabled={suggesting} onClick={() => void suggestTitle()}>{suggesting ? <LoaderCircle className="size-4 animate-spin" /> : <Sparkles className="size-4" />}{suggesting ? "生成中…" : pitch ? "重新生成候选" : "AI 生成书名和简介"}</Button></div><Field label="书名" value={title} onChange={(value) => { setTitle(value); setTitleAvailable(null); }} hint={titleAvailable === false ? "该书名已存在，请修改或重新生成。" : undefined} /><Field label="简介" value={pitch?.synopsis || ""} onChange={(value) => setPitch({ premise: pitch?.premise || "", theme: pitch?.theme || "", logline: pitch?.logline || "", synopsis: value, reading_tags: pitch?.reading_tags || [], content_tags: pitch?.content_tags || [], protagonist_names: pitch?.protagonist_names || [] })} multiline rows={8} hint="支持手动编辑；AI 结果不会自动覆盖你的修改。" />{pitch ? <div className="grid gap-4 rounded-[8px] bg-[#f7f9fc] p-4 md:grid-cols-2"><Field label="故事前提" value={pitch.premise} onChange={(v) => setPitch({ ...pitch, premise: v })} multiline rows={3} /><Field label="主题" value={pitch.theme} onChange={(v) => setPitch({ ...pitch, theme: v })} /><Field label="一句话钩子" value={pitch.logline} onChange={(v) => setPitch({ ...pitch, logline: v })} /><Field label="主角名" value={pitch.protagonist_names.join("、")} onChange={(v) => setPitch({ ...pitch, protagonist_names: v.split(/[、，,]/).map((item) => item.trim()).filter(Boolean) })} /></div> : null}<div className="flex items-center justify-between border-t border-[#edf1f6] pt-5"><Button variant="outline" onClick={() => setStep(1)}><ArrowLeft className="size-4" />上一步</Button><Button className="bg-[#2563eb] hover:bg-[#1d4ed8]" onClick={nextFromPitch}>下一步：确认创建 <ChevronRight className="size-4" /></Button></div></> : null}{step === 3 ? <><div className="space-y-4"><ReviewGroup title="书名与简介" onEdit={() => setStep(2)}><p className="font-semibold text-[#25365a]">{title || "未填写书名"}</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#718099]">{pitch?.synopsis || "未填写简介"}</p></ReviewGroup><ReviewGroup title="创作方向" onEdit={() => setStep(1)}><div className="grid gap-3 text-sm sm:grid-cols-2"><span>题材：<b>{selectedGenre || "未选择"}</b></span><span>目标读者：<b>{targetReader === "male" ? "男频" : "女频"}</b></span><span>语言：<b>{language === "zh-CN" ? "简体中文" : "English"}</b></span><span>计划章节：<b>{chapterCountTarget} 章</b></span></div>{brief ? <p className="mt-3 text-sm leading-6 text-[#718099]">核心创意：{brief}</p> : null}</ReviewGroup><ReviewGroup title="参考研究" onEdit={() => setStep(1)}><p className="text-sm text-[#718099]">{distillationCompleted ? "已完成参考作品分析，将作为创作参考。" : "未添加参考作品，创建仍可继续。"}</p></ReviewGroup></div><div className="flex items-center justify-between border-t border-[#edf1f6] pt-5"><Button variant="outline" onClick={() => setStep(2)}><ArrowLeft className="size-4" />上一步</Button><Button className="h-11 bg-[#2563eb] px-6 hover:bg-[#1d4ed8]" disabled={saving || titleAvailable === false} onClick={() => void createProject()}>{saving ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}{saving ? "创建中…" : "确认创建"}</Button></div></> : null}</div></Panel><div className="space-y-5">{preview}<Panel className="p-5"><h2 className="text-[17px] font-bold text-[#172443]">接下来会发生什么</h2><div className="mt-4 space-y-3 text-sm text-[#718099]"><p className="flex gap-2"><Sparkles className="size-4 shrink-0 text-[#2563eb]" />1. AI 辅助生成书名与简介（可选）</p><p className="flex gap-2"><Check className="size-4 shrink-0 text-[#2563eb]" />2. 确认后创建正式作品</p><p className="flex gap-2"><BookOpen className="size-4 shrink-0 text-[#2563eb]" />3. 进入作品概览继续策划</p></div></Panel></div></div></div></div>;
 }
+
+function ReviewGroup({ title, onEdit, children }: { title: string; onEdit: () => void; children: React.ReactNode }) { return <section className="rounded-[9px] border border-[#e0e7f1] p-4"><div className="flex items-center justify-between gap-3"><h3 className="font-semibold text-[#25365a]">{title}</h3><button type="button" onClick={onEdit} className="text-sm font-semibold text-[#2563eb]">修改</button></div><div className="mt-3">{children}</div></section>; }

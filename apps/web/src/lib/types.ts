@@ -216,7 +216,10 @@ export type ScenePlan = {
 
 export type Hook = {
   id: string;
+  project_id?: string;
   hook_type: string;
+  setup_chapter_id?: string | null;
+  resolved_chapter_id?: string | null;
   status: string;
   importance: string;
   description: string;
@@ -224,6 +227,10 @@ export type Hook = {
 
 export type Foreshadowing = {
   id: string;
+  project_id?: string;
+  setup_chapter_id?: string | null;
+  expected_payoff_chapter_id?: string | null;
+  actual_payoff_chapter_id?: string | null;
   status: string;
   description: string;
   clue_text: string | null;
