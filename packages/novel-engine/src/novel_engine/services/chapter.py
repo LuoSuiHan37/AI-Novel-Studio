@@ -26,7 +26,7 @@ class ChapterService:
             raise NotFoundError("chapter not found")
         return chapter
 
-    async def update(self, chapter: Chapter) -> Chapter:
+    async def update(self, chapter: Chapter, *, commit: bool = True) -> Chapter:
         current = await self._uow.chapters.get(chapter.id)
         if current is None:
             raise NotFoundError("chapter not found")
@@ -49,7 +49,8 @@ class ChapterService:
                 }
             )
         )
-        await self._uow.commit()
+        if commit:
+            await self._uow.commit()
         return saved
 
     async def mark_reviewed(self, project_id: uuid.UUID, chapter_number: int) -> Chapter:

@@ -10,13 +10,21 @@ from app.api.schemas import ActorOut, ConfirmBody, ProjectCreate, ProjectTitleSu
 from app.services.book_snapshot import save_project_snapshot
 from novel_engine.agents.contracts import IdeaInput
 from novel_engine.creative.profile import compile_creative_profile
-from novel_engine.domain.errors import NotFoundError
+from novel_engine.domain.errors import InvalidStateError, NotFoundError
 from novel_engine.models.entities import StoryBible
+from novel_engine.models.enums import ProjectStatus
 from novel_engine.services.engine import NovelEngine
 from novel_engine.workflows.agent_workflow import AgentWorkflow
 from novel_engine.models.entities import NovelProject
 
 router = APIRouter(tags=["projects"])
+
+
+def _normalize_target_platform(language: str | None, platform: str | None) -> str | None:
+    """Keep the bundled Chinese rules from being bypassed by the English default."""
+    if (language or "").lower() in {"zh", "zh-cn"} and (not platform or platform == "alphanovel"):
+        return "fanqie"
+    return platform
 
 
 @router.post("/projects/title-suggestion")
@@ -25,6 +33,24 @@ async def suggest_project_title(
     workflow: Annotated[AgentWorkflow, Depends(get_workflow)],
     engine: Annotated[NovelEngine, Depends(get_engine)],
 ) -> dict:
+    if body.research_project_id is None or body.research_binding is None:
+        raise InvalidStateError("书名和简介生成必须绑定已完成的参考研究")
+    research_project = await engine.get_project(body.research_project_id)
+    research = (research_project.extra_metadata or {}).get("research") or {}
+    stages = research.get("stages") or []
+    profile = next(
+        (item.get("content") for item in research.get("artifacts", []) if item.get("id") == body.research_binding.profile_artifact_id),
+        None,
+    )
+    source_ids = {str(item.get("id")) for item in research.get("sources", [])}
+    if research.get("session_id") != body.research_binding.session_id:
+        raise InvalidStateError("研究会话与当前项目不匹配")
+    if not body.research_binding.source_ids or not set(body.research_binding.source_ids).issubset(source_ids):
+        raise InvalidStateError("书名和简介生成必须绑定已登记的参考作品")
+    if research.get("status") != "completed" or not stages or not all(item.get("status") == "done" for item in stages):
+        raise InvalidStateError("请先完成全部参考研究阶段")
+    if not profile:
+        raise InvalidStateError("请先生成原创创作 Profile")
     existing_titles = [item.title for item in await engine.list_projects()]
     avoid = ", ".join(existing_titles) if existing_titles else "none"
     result = await workflow.propose_idea(
@@ -37,7 +63,7 @@ async def suggest_project_title(
                 f"Author's core idea: {body.brief.strip() or 'No fixed idea; invent a fresh premise for this genre.'}\n"
                 f"Create a consistent reader-facing book package for genre '{body.genre}'. "
                 f"Do not reuse any existing title: {avoid}. Return a fresh title and synopsis."
-                + (f"\nUse these distilled, abstract craft findings as constraints, without copying plot or wording: {body.research_profile}" if body.research_profile else "")
+                + f"\nUse these distilled, abstract craft findings as constraints, without copying plot or wording: {profile}"
             ),
         )
     )
@@ -54,6 +80,7 @@ async def suggest_project_title(
         "reading_tags": result.output.reading_tags,
         "content_tags": result.output.content_tags,
         "protagonist_names": result.output.protagonist_names,
+        "research_binding": body.research_binding.model_dump(mode="json"),
     }
 
 
@@ -117,9 +144,10 @@ async def create_project(
     project = await engine.create_project(
         NovelProject(
             title=body.title,
+            status=ProjectStatus.DRAFT,
             genre=body.genre,
             tropes=body.tropes,
-            target_platform=body.target_platform,
+            target_platform=_normalize_target_platform(body.language, body.target_platform) or "alphanovel",
             language=body.language,
             chapter_count_target=body.chapter_count_target,
             extra_metadata={
@@ -170,6 +198,11 @@ async def patch_project(
 ) -> NovelProject:
     current = await engine.get_project(project_id)
     updates = body.model_dump(exclude_unset=True)
+    if "language" in updates or "target_platform" in updates:
+        updates["target_platform"] = _normalize_target_platform(
+            updates.get("language", current.language),
+            updates.get("target_platform", current.target_platform),
+        )
     creative_profile = updates.pop("creative_profile", None)
     if creative_profile is not None:
         updates["extra_metadata"] = {

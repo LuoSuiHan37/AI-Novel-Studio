@@ -18,7 +18,7 @@ class WorldBibleService:
         await require_project(self._uow, project_id)
         return await self._uow.world_bibles.get_by_project(project_id)
 
-    async def upsert(self, bible: WorldBible) -> WorldBible:
+    async def upsert(self, bible: WorldBible, *, commit: bool = True) -> WorldBible:
         await require_project(self._uow, bible.project_id)
         if not bible.name.strip() or not bible.summary.strip():
             raise InvalidStateError("world name and summary are required")
@@ -28,7 +28,8 @@ class WorldBibleService:
             bible.rules = existing.rules if not bible.rules else bible.rules
         bible.status = ApprovalStatus.APPROVED
         saved = await self._uow.world_bibles.save(bible)
-        await self._uow.commit()
+        if commit:
+            await self._uow.commit()
         return saved
 
     async def add_rule(self, project_id: uuid.UUID, rule: WorldRule) -> WorldBible:

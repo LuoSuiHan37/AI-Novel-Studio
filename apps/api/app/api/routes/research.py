@@ -8,12 +8,13 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, status
 
 from app.api.deps import get_engine, get_optional_llm_provider
-from app.api.schemas import ConfirmBody, ResearchSessionOut, ResearchSourceCreate, ResearchSourceUpload, ResearchStageUpdate
+from app.api.schemas import ConfirmBody, CreationPitch, ProjectFinalizeCreation, ResearchSessionOut, ResearchSourceCreate, ResearchSourceUpload, ResearchStageUpdate
 from app.core.config import Settings, get_settings
 from app.services.book_snapshot import save_project_snapshot
+from novel_engine.domain.errors import InvalidStateError
 from novel_engine.services.engine import NovelEngine
 from novel_engine.models.entities import Character, ChapterPlan, MasterPlot, PlotBeat, ScenePlan, StoryArc, StoryBible, WorldBible, WorldRule
-from novel_engine.models.enums import CharacterRole, IntensityLevel, NarrativeTense, PointOfView
+from novel_engine.models.enums import CharacterRole, IntensityLevel, NarrativeTense, PointOfView, ProjectStatus
 from novel_engine.providers.base import LLMProvider
 from novel_engine.research.executor import DistillationExecutor
 
@@ -25,12 +26,12 @@ STAGE_DEFS = (
     ("scan", "题材与市场扫描", "对比开篇、钩子、节奏、卖点和读者承诺"),
     ("synthesis", "多本归纳", "把具体文本提升为可迁移的创作规律"),
     ("profile", "生成创作 Profile", "形成结构、文案、节奏和表达控制项"),
-    ("inject", "注入原创项目", "写入 Story Bible、主线和章节规划建议"),
 )
 
 
 def _new_session() -> dict:
     return {
+        "session_id": str(uuid4()),
         "status": "idle",
         "progress": 0,
         "stages": [
@@ -46,7 +47,6 @@ def _new_session() -> dict:
         ],
         "sources": [],
         "artifacts": [],
-        "injection_approved_by": None,
         "active_task": None,
     }
 
@@ -57,6 +57,11 @@ def _session(project) -> dict:
         return _new_session()
     base = _new_session()
     base.update(research)
+    # Older projects stored research without a stable session id.  Keep the
+    # session recoverable while ensuring new creative output can bind to one
+    # immutable research run.
+    if not base.get("session_id"):
+        base["session_id"] = str(uuid4())
     return base
 
 
@@ -101,7 +106,11 @@ async def get_research(
     project_id: UUID,
     engine: Annotated[NovelEngine, Depends(get_engine)],
 ) -> dict:
-    return _session(await engine.get_project(project_id))
+    project = await engine.get_project(project_id)
+    research = _session(project)
+    if (project.extra_metadata or {}).get("research", {}).get("session_id") != research.get("session_id"):
+        project = await engine.update_project(_save(project, research))
+    return _session(project)
 
 
 @router.post("/projects/{project_id}/research/sources", response_model=ResearchSessionOut, status_code=status.HTTP_201_CREATED)
@@ -113,7 +122,15 @@ async def add_research_source(
     project = await engine.get_project(project_id)
     research = _session(project)
     research["sources"].append({"id": str(uuid4()), **body.model_dump(), "status": "queued"})
-    saved = await engine.update_project(_save(project, research))
+    draft_project = _save(project, research).model_copy(update={
+        "status": ProjectStatus.DRAFT,
+        "extra_metadata": {
+            **(project.extra_metadata or {}),
+            "research": research,
+            "creation_status": "draft",
+        },
+    })
+    saved = await engine.update_project(draft_project)
     await save_project_snapshot(engine, saved.id)
     return _session(saved)
 
@@ -274,21 +291,6 @@ async def complete_research_stage(
                 raise
             _artifact(research, "profile", "原创创作 Profile", profile, "profile")
             current["output"] = "已生成可注入原创项目的创作 Profile"
-        elif stage_id == "inject":
-            if provider is None:
-                from novel_engine.domain.errors import InvalidStateError
-                raise InvalidStateError("注入提案阶段需要先配置 LLM API Key")
-            profile = next((item.get("content") for item in research.get("artifacts", []) if item.get("id") == "profile"), None)
-            if not profile:
-                from novel_engine.domain.errors import InvalidStateError
-                raise InvalidStateError("请先生成创作 Profile")
-            try:
-                proposal = await executor.inject(provider, profile, {"title": project.title, "genre": project.genre, "target_platform": project.target_platform, "language": project.language})
-            except Exception as exc:
-                await _mark_stage_failure(engine, project, research, current, exc)
-                raise
-            _artifact(research, "inject", "待确认的项目注入包", {"proposal": proposal, "requires_human_approval": True}, "proposal")
-            current["output"] = "已生成注入提案，等待人工确认"
         current["status"] = "done"
     else:
         current["status"] = body.status
@@ -307,26 +309,28 @@ async def complete_research_stage(
     return _session(saved)
 
 
-@router.post("/projects/{project_id}/research/inject/approve", response_model=ResearchSessionOut)
-async def approve_research_injection(
+async def _apply_framework_proposal(
     project_id: UUID,
     body: ConfirmBody,
     engine: Annotated[NovelEngine, Depends(get_engine)],
+    *,
+    commit: bool = True,
+    write_story_bible: bool = True,
 ) -> dict:
     if not body.confirmed_by or not body.confirmed_by.strip():
         from novel_engine.domain.errors import ApprovalRequiredError
-        raise ApprovalRequiredError("confirmed_by is required to inject the research proposal")
+        raise ApprovalRequiredError("confirmed_by is required to apply the framework proposal")
     project = await engine.get_project(project_id)
     research = _session(project)
     # Approval must be idempotent: retries, double clicks, and multiple tabs
-    # must not re-apply the same proposal.
-    if research.get("injection_approved_by"):
+    # must not re-apply the same framework proposal.
+    if research.get("framework_confirmed_by"):
         return research
-    artifact = next((item for item in research.get("artifacts", []) if item.get("id") == "inject"), None)
+    artifact = next((item for item in research.get("artifacts", []) if item.get("id") == "framework_proposal"), None)
     proposal = (artifact or {}).get("content", {}).get("proposal")
     if not proposal:
         from novel_engine.domain.errors import InvalidStateError
-        raise InvalidStateError("请先完成原创创作 Profile 和注入提案")
+        raise InvalidStateError("请先生成小说框架提案")
 
     def enum_or(value: str, enum_type, default):
         try:
@@ -334,23 +338,25 @@ async def approve_research_injection(
         except ValueError:
             return default
 
-    await engine.story_bibles.upsert(StoryBible(
-        project_id=project_id,
-        premise=proposal["premise"],
-        theme=proposal["theme"],
-        tone=proposal["tone"],
-        narrative_style=proposal["narrative_style"],
-        pov=enum_or(proposal.get("pov", "third_limited"), PointOfView, PointOfView.THIRD_LIMITED),
-        tense=enum_or(proposal.get("tense", "past"), NarrativeTense, NarrativeTense.PAST),
-        romance_level=enum_or(proposal.get("romance_level", "high"), IntensityLevel, IntensityLevel.HIGH),
-        violence_level=enum_or(proposal.get("violence_level", "medium"), IntensityLevel, IntensityLevel.MEDIUM),
-        heat_level=enum_or(proposal.get("heat_level", "medium"), IntensityLevel, IntensityLevel.MEDIUM),
-        target_word_count=80_000,
-        chapter_word_count=2_500,
-        tropes=proposal.get("tropes", []),
-        logline=proposal["logline"],
-        synopsis=proposal["synopsis"],
-    ))
+    if write_story_bible:
+        await engine.story_bibles.upsert(StoryBible(
+            project_id=project_id,
+            premise=proposal["premise"],
+            theme=proposal["theme"],
+            tone=proposal["tone"],
+            narrative_style=proposal["narrative_style"],
+            pov=enum_or(proposal.get("pov", "third_limited"), PointOfView, PointOfView.THIRD_LIMITED),
+            tense=enum_or(proposal.get("tense", "past"), NarrativeTense, NarrativeTense.PAST),
+            romance_level=enum_or(proposal.get("romance_level", "high"), IntensityLevel, IntensityLevel.HIGH),
+            violence_level=enum_or(proposal.get("violence_level", "medium"), IntensityLevel, IntensityLevel.MEDIUM),
+            heat_level=enum_or(proposal.get("heat_level", "medium"), IntensityLevel, IntensityLevel.MEDIUM),
+            target_word_count=80_000,
+            chapter_word_count=2_500,
+            tropes=proposal.get("tropes", []),
+            logline=proposal["logline"],
+            synopsis=proposal["synopsis"],
+            extra_metadata={"research_session_id": research.get("session_id"), "research_source_ids": [str(item.get("id")) for item in research.get("sources", [])]},
+        ), commit=commit)
     plot = MasterPlot(
         project_id=project_id,
         title=proposal["title"],
@@ -361,9 +367,9 @@ async def approve_research_injection(
     )
     existing = next((item for item in await engine.master_plots.list(project_id) if item.is_active), None)
     if existing:
-        plot = await engine.master_plots.update(plot.model_copy(update={"id": existing.id}))
+        plot = await engine.master_plots.update(plot.model_copy(update={"id": existing.id}), commit=commit)
     else:
-        plot = await engine.master_plots.create(plot)
+        plot = await engine.master_plots.create(plot, commit=commit)
 
     world_data = proposal.get("world")
     if world_data:
@@ -381,7 +387,7 @@ async def approve_research_injection(
             geography=world_data.get("geography"),
             factions=world_data.get("factions", []),
             rules=[WorldRule(world_bible_id=world_id, **rule) for rule in world_data.get("rules", [])],
-        ))
+        ), commit=commit)
 
     existing_characters = await engine.characters.list(project_id)
     existing_names = {item.name.casefold() for item in existing_characters}
@@ -396,7 +402,7 @@ async def approve_research_injection(
         await engine.characters.create(Character(
             project_id=project_id,
             **{**item, "name": name, "role": role},
-        ))
+        ), commit=commit)
 
     existing_arcs = await engine.story_arcs.list(project_id)
     existing_sequences = {item.sequence for item in existing_arcs}
@@ -408,11 +414,11 @@ async def approve_research_injection(
             master_plot_id=plot.id,
             arc_type="main",
             **item,
-        ))
+        ), commit=commit)
 
     # Turn the launch cards into editable draft plans. They are deliberately
     # conservative seed plans: no prose is generated and all remain pending
-    # human review. Re-approving an injection is idempotent per chapter number.
+    # human review. Re-applying a framework is idempotent per chapter number.
     seeded_arcs = await engine.story_arcs.list(project_id)
     seeded_characters = await engine.characters.list(project_id)
     character_names = [item.name for item in seeded_characters[:4]] or ["Protagonist"]
@@ -464,7 +470,7 @@ async def approve_research_injection(
             setup=str(card.get("setup") or purpose).strip(),
             payoff=str(card.get("payoff") or "The immediate question changes shape.").strip(),
             cliffhanger=hook,
-        ))
+        ), commit=commit)
         scenes = card.get("scenes") or [{
             "location": location,
             "goal": purpose,
@@ -488,7 +494,7 @@ async def approve_research_injection(
                 emotion=str(scene.get("emotion") or emotional_turn).strip(),
                 information_revealed=str(scene.get("information_revealed") or reveal).strip(),
                 ending=str(scene.get("ending") or hook).strip(),
-            ))
+            ), commit=commit)
         arc = next(
             (
                 item for item in seeded_arcs
@@ -502,9 +508,14 @@ async def approve_research_injection(
             # again by number can fail for legacy or partially migrated data.
             chapter = await engine.uow.chapters.get(saved_plan.chapter_id)
             if chapter is not None:
-                await engine.chapters.update(chapter.model_copy(update={"story_arc_id": arc.id}))
-    research["injection_approved_by"] = body.confirmed_by.strip()
-    research["injection_note"] = body.note
+                await engine.chapters.update(chapter.model_copy(update={"story_arc_id": arc.id}), commit=commit)
+    research["framework_confirmed_by"] = body.confirmed_by.strip()
+    research["framework_confirmation_note"] = body.note
+    for item in research.get("artifacts", []):
+        if item.get("id") == "framework_proposal":
+            content = dict(item.get("content") or {})
+            content["status"] = "approved"
+            item["content"] = content
     research["creative_profile"] = {
         "profile": next(
             (item.get("content") for item in research.get("artifacts", []) if item.get("id") == "profile"),
@@ -527,6 +538,178 @@ async def approve_research_injection(
         "workflow_policy": "strict_hitl",
         }
     })
+    saved = await engine.update_project(_save(project, research), commit=commit)
+    if commit:
+        await save_project_snapshot(engine, saved.id)
+    return _session(saved)
+
+
+@router.post("/projects/{project_id}/framework-proposal")
+async def create_framework_proposal(
+    project_id: UUID,
+    body: CreationPitch,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+    provider: Annotated[LLMProvider | None, Depends(get_optional_llm_provider)],
+) -> dict:
+    """Create a reviewable framework proposal from the confirmed creation pitch."""
+    project = await engine.get_project(project_id)
+    research = _session(project)
+    stages = research.get("stages") or []
+    if research.get("status") != "completed" or not stages or not all(item.get("status") == "done" for item in stages):
+        raise InvalidStateError("请先完成全部参考研究阶段")
+    if research.get("session_id") != body.research_binding.session_id:
+        raise InvalidStateError("研究会话与当前项目不匹配")
+    source_ids = {str(item.get("id")) for item in research.get("sources", [])}
+    if not set(body.research_binding.source_ids).issubset(source_ids):
+        raise InvalidStateError("创作提案使用了未登记的参考作品")
+    profile = next((item.get("content") for item in research.get("artifacts", []) if item.get("id") == "profile"), None)
+    if not profile:
+        raise InvalidStateError("请先生成原创创作 Profile")
+    if provider is None:
+        raise InvalidStateError("生成小说框架前需要配置 LLM API Key")
+    proposal = await DistillationExecutor().generate_framework_proposal(
+        provider,
+        profile,
+        {
+            "title": body.premise[:80] or project.title,
+            "genre": project.genre,
+            "target_platform": project.target_platform,
+            "language": project.language,
+            "creation_proposal": body.model_dump(mode="json"),
+        },
+    )
+    artifact = {
+        "id": "framework_proposal",
+        "title": "待确认的小说框架提案",
+        "type": "framework_proposal",
+        "content": {
+            "proposal": proposal,
+            "creation_proposal": body.model_dump(mode="json"),
+            "research_binding": body.research_binding.model_dump(mode="json"),
+            "status": "pending_confirmation",
+        },
+    }
+    research["artifacts"] = [item for item in research.get("artifacts", []) if item.get("id") != "framework_proposal"] + [artifact]
+    research["creation_proposal"] = {
+        **body.model_dump(mode="json"),
+        "status": "confirmed",
+    }
     saved = await engine.update_project(_save(project, research))
     await save_project_snapshot(engine, saved.id)
-    return _session(saved)
+    return {"proposal": proposal, "research_binding": body.research_binding.model_dump(mode="json"), "status": "pending_confirmation"}
+
+
+@router.post("/projects/{project_id}/finalize-creation")
+async def finalize_creation(
+    project_id: UUID,
+    body: ProjectFinalizeCreation,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+) -> object:
+    """Atomically finalize a research-backed book draft.
+
+    LLM work happens before this endpoint.  This endpoint only validates the
+    approved research binding and persists the project package in one DB
+    transaction, so a later write cannot leave a partially-created book.
+    """
+    from novel_engine.domain.errors import ApprovalRequiredError
+
+    if not body.confirmed_by.strip():
+        raise ApprovalRequiredError("confirmed_by is required")
+    if body.research_binding != body.pitch.research_binding:
+        raise InvalidStateError("书名简介与最终创建使用的研究绑定不一致")
+    if not body.framework_confirmed:
+        raise InvalidStateError("请先确认小说框架提案")
+
+    project = await engine.get_project(project_id)
+    research = _session(project)
+    stages = research.get("stages") or []
+    if research.get("status") != "completed" or not stages or not all(item.get("status") == "done" for item in stages):
+        raise InvalidStateError("请先完成全部参考研究阶段")
+    if research.get("session_id") != body.research_binding.session_id:
+        raise InvalidStateError("研究会话与当前项目不匹配")
+    available_source_ids = {str(item.get("id")) for item in research.get("sources", [])}
+    if not set(body.research_binding.source_ids).issubset(available_source_ids):
+        raise InvalidStateError("最终创建使用了未登记的参考作品")
+    profile = next(
+        (item.get("content") for item in research.get("artifacts", []) if item.get("id") == body.research_binding.profile_artifact_id),
+        None,
+    )
+    if not profile:
+        raise InvalidStateError("请先生成原创创作 Profile")
+    framework_artifact = next((item for item in research.get("artifacts", []) if item.get("id") == "framework_proposal"), None)
+    framework_content = (framework_artifact or {}).get("content", {})
+    if framework_content.get("status") != "pending_confirmation":
+        raise InvalidStateError("小说框架提案不存在或已失效")
+    if framework_content.get("research_binding") != body.research_binding.model_dump(mode="json"):
+        raise InvalidStateError("小说框架提案与当前研究绑定不一致")
+    if framework_content.get("creation_proposal") != body.pitch.model_dump(mode="json"):
+        raise InvalidStateError("创作提案已修改，请重新生成小说框架")
+    if framework_content.get("proposal") != body.framework_proposal:
+        raise InvalidStateError("提交的小说框架不是当前提案版本")
+
+    existing_titles = [item for item in await engine.list_projects() if item.id != project_id]
+    if any(item.title.strip().casefold() == body.title.strip().casefold() for item in existing_titles):
+        from novel_engine.domain.errors import DuplicateError
+        raise DuplicateError(f"project title already exists: {body.title}")
+
+    try:
+        # The research proposal remains the sole source for the framework in
+        # this phase.  The user-confirmed pitch owns Story Bible fields; it is
+        # written once below instead of being written and then overwritten.
+        await _apply_framework_proposal(
+            project_id,
+            ConfirmBody(confirmed_by=body.confirmed_by, note="Finalized during book creation"),
+            engine,
+            commit=False,
+            write_story_bible=False,
+        )
+        project = await engine.get_project(project_id)
+        active_plots = await engine.master_plots.list(project_id)
+        active_plot = next((item for item in active_plots if item.is_active), None)
+        if active_plot is not None and active_plot.title != body.title.strip():
+            await engine.master_plots.update(
+                active_plot.model_copy(update={"title": body.title.strip()}),
+                commit=False,
+            )
+        binding_metadata = body.research_binding.model_dump(mode="json")
+        updated_project = await engine.update_project(
+            project.model_copy(update={
+                "title": body.title.strip(),
+                "status": ProjectStatus.PLANNING,
+                "genre": body.genre,
+                "language": body.language,
+                "target_platform": body.target_platform,
+                "chapter_count_target": body.chapter_count_target,
+                "extra_metadata": {
+                    **(project.extra_metadata or {}),
+                    "creation_status": "created",
+                    "research_binding": binding_metadata,
+                },
+            }),
+            commit=False,
+        )
+        await engine.story_bibles.upsert(StoryBible(
+            project_id=project_id,
+            premise=body.pitch.premise,
+            theme=body.pitch.theme,
+            tone=body.genre.replace("_", " "),
+            narrative_style="close third serial",
+            pov=PointOfView.THIRD_LIMITED,
+            tense=NarrativeTense.PAST,
+            romance_level=IntensityLevel.HIGH,
+            violence_level=IntensityLevel.MEDIUM,
+            heat_level=IntensityLevel.MEDIUM,
+            target_word_count=80_000,
+            chapter_word_count=2_500 if body.language == "zh-CN" else 1_800,
+            tropes=[body.genre],
+            logline=body.pitch.logline,
+            synopsis=body.pitch.synopsis,
+            extra_metadata={"research_binding": binding_metadata, "target_reader": body.target_reader, "reading_tags": body.pitch.reading_tags, "content_tags": body.pitch.content_tags, "protagonist_names": body.pitch.protagonist_names},
+        ), commit=False)
+        await engine.uow.commit()
+    except Exception:
+        await engine.uow.rollback()
+        raise
+
+    await save_project_snapshot(engine, updated_project.id)
+    return updated_project

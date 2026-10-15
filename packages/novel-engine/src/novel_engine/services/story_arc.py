@@ -24,7 +24,7 @@ class StoryArcService:
         await require_project(self._uow, project_id)
         return await self._uow.story_arcs.list_by_project(project_id)
 
-    async def create(self, arc: StoryArc) -> StoryArc:
+    async def create(self, arc: StoryArc, *, commit: bool = True) -> StoryArc:
         await require_project(self._uow, arc.project_id)
         plot = await self._uow.master_plots.get(arc.master_plot_id)
         if plot is None or plot.project_id != arc.project_id:
@@ -35,7 +35,8 @@ class StoryArcService:
             raise DuplicateError(f"story arc sequence already used: {arc.sequence}")
         arc.status = ApprovalStatus.APPROVED
         saved = await self._uow.story_arcs.save(arc)
-        await self._uow.commit()
+        if commit:
+            await self._uow.commit()
         return saved
 
     async def update(self, arc: StoryArc) -> StoryArc:

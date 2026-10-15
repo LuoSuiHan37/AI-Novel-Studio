@@ -6,6 +6,8 @@ from novel_engine.models.enums import ChapterStatus, PipelineStage, ProjectStatu
 from novel_engine.ports.repositories import NovelUnitOfWork
 from novel_engine.style.chapter_repetition import scan_book_repetition
 from novel_engine.style.chapter_relevance import scan_chapter_relevance
+from novel_engine.style.word_count import count_text_units
+from novel_engine.presets.loader import resolve_style_bundle
 
 STAGE_ORDER: tuple[PipelineStage, ...] = (
     PipelineStage.IDEA,
@@ -99,6 +101,30 @@ class PipelineService:
             empty = next((item.chapter_number for item in chapters if not item.content.strip()), None)
             if empty is not None:
                 raise InvalidStateError(f"cannot publish: chapter {empty} is empty")
+            style = resolve_style_bundle(
+                platform_id=project.target_platform,
+                novel_id=project.genre,
+                language=project.language,
+            )
+            out_of_range = next(
+                (
+                    item
+                    for item in chapters
+                    if not (
+                        style.platform.chapter_word_min
+                        <= count_text_units(item.content)
+                        <= style.platform.chapter_word_max
+                    )
+                ),
+                None,
+            )
+            if out_of_range is not None:
+                count = count_text_units(out_of_range.content)
+                raise InvalidStateError(
+                    f"cannot publish: chapter {out_of_range.chapter_number} has "
+                    f"{count} counted units; expected "
+                    f"{style.platform.chapter_word_min}-{style.platform.chapter_word_max}"
+                )
             unfinished = next(
                 (item.chapter_number for item in chapters
                  if item.status not in {ChapterStatus.APPROVED, ChapterStatus.PUBLISHED}),

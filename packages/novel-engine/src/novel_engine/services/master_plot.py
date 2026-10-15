@@ -24,22 +24,24 @@ class MasterPlotService:
         await require_project(self._uow, project_id)
         return await self._uow.master_plots.list_by_project(project_id)
 
-    async def create(self, plot: MasterPlot) -> MasterPlot:
+    async def create(self, plot: MasterPlot, *, commit: bool = True) -> MasterPlot:
         await require_project(self._uow, plot.project_id)
         _validate_plot(plot)
         plot.status = ApprovalStatus.APPROVED
         if plot.is_active:
             await self._deactivate_others(plot.project_id, except_id=None)
         saved = await self._uow.master_plots.save(plot)
-        await self._uow.commit()
+        if commit:
+            await self._uow.commit()
         return saved
 
-    async def update(self, plot: MasterPlot) -> MasterPlot:
+    async def update(self, plot: MasterPlot, *, commit: bool = True) -> MasterPlot:
         current = await self.get(plot.id)
         _validate_plot(plot)
         plot.status = ApprovalStatus.APPROVED
         saved = await self._uow.master_plots.save(plot)
-        await self._uow.commit()
+        if commit:
+            await self._uow.commit()
         return saved
 
     async def activate(self, plot_id: uuid.UUID) -> MasterPlot:

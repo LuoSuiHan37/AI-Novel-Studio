@@ -57,6 +57,17 @@ class ProjectTitleSuggest(ApiModel):
     brief: str = ""
     language: str = "en"
     research_profile: dict | None = None
+    research_binding: "ResearchBinding | None" = None
+    research_project_id: uuid.UUID | None = None
+
+
+class ResearchBinding(ApiModel):
+    """Stable provenance for creative output derived from reference research."""
+
+    session_id: str
+    source_ids: list[str] = Field(min_length=1)
+    profile_artifact_id: str = "profile"
+    profile_version: int = Field(default=1, ge=1)
 
 
 class ProjectUpdate(BaseModel):
@@ -75,6 +86,31 @@ class ProjectUpdate(BaseModel):
     logline: str | None = None
     synopsis: str | None = None
     creative_profile: dict | None = None
+
+
+class CreationPitch(ApiModel):
+    premise: str
+    theme: str
+    logline: str
+    synopsis: str
+    reading_tags: list[str] = Field(default_factory=list)
+    content_tags: list[str] = Field(default_factory=list)
+    protagonist_names: list[str] = Field(default_factory=list)
+    research_binding: ResearchBinding
+
+
+class ProjectFinalizeCreation(ApiModel):
+    title: str
+    genre: str
+    language: str = "en"
+    target_platform: str | None = "alphanovel"
+    chapter_count_target: int = Field(default=120, ge=1, le=5000)
+    target_reader: str = "female"
+    pitch: CreationPitch
+    research_binding: ResearchBinding
+    framework_proposal: dict
+    framework_confirmed: bool = False
+    confirmed_by: str
 
 
 class StoryPatch(BaseModel):
@@ -366,6 +402,7 @@ class ResearchStageUpdate(ApiModel):
 
 
 class ResearchSessionOut(ApiModel):
+    session_id: str = ""
     status: str
     progress: int
     stages: list[dict]

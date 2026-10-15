@@ -54,7 +54,7 @@ export function buildChecklist(
     {
       id: "characters",
       label: "角色已就绪（自动确定）",
-      done: data.characters.length > 0,
+      done: data.characters.length > 0 && data.characters.every((item) => approved(item.status)),
       href: `${base}/characters`,
       hint: `${data.characters.length} 个角色`,
     },

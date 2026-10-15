@@ -24,7 +24,7 @@ class ChapterPlanService:
         await require_project(self._uow, project_id)
         return await self._uow.chapter_plans.list_by_project(project_id)
 
-    async def create(self, plan: ChapterPlan) -> ChapterPlan:
+    async def create(self, plan: ChapterPlan, *, auto_approve: bool = True, commit: bool = True) -> ChapterPlan:
         project = await require_project(self._uow, plan.project_id)
         _validate_plan(plan)
         target = project.chapter_count_target
@@ -47,7 +47,7 @@ class ChapterPlanService:
             update={
                 "chapter_id": chapter.id,
                 "version": version,
-                "status": ApprovalStatus.APPROVED,
+                "status": ApprovalStatus.APPROVED if auto_approve else ApprovalStatus.DRAFT,
             }
         )
         saved = await self._uow.chapter_plans.save(plan)
@@ -63,7 +63,8 @@ class ChapterPlanService:
                 "status": "planned",
             }
             await self._uow.chapters.save(chapter.model_copy(update={"extra_metadata": metadata}))
-        await self._uow.commit()
+        if commit:
+            await self._uow.commit()
         return saved
 
     async def update(self, plan: ChapterPlan) -> ChapterPlan:
@@ -114,7 +115,7 @@ class ChapterPlanService:
                 "chapter_id": current.chapter_id,
                 "chapter_number": current.chapter_number,
                 "version": current.version + 1,
-                "status": ApprovalStatus.APPROVED,
+                "status": ApprovalStatus.DRAFT,
             }
         )
         saved = await self._uow.chapter_plans.save(next_plan)

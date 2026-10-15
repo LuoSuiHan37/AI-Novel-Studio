@@ -340,6 +340,7 @@ export type ResearchSource = {
 };
 
 export type ResearchSession = {
+  session_id: string;
   status: "idle" | "running" | "completed" | "failed";
   progress: number;
   stages: ResearchStage[];

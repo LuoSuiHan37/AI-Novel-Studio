@@ -1,7 +1,7 @@
 import { api } from "@/lib/api";
 import { DEFAULT_CHARACTER, defaultPlan } from "@/lib/defaults";
 import { confirmResource, tryAdvancePipeline } from "@/lib/hitl";
-import type { Chapter, Character, StoryArc } from "@/lib/types";
+import type { Chapter, Character, Project, StoryArc } from "@/lib/types";
 
 export function writeHref(projectId: string, chapterNumber = 1): string {
   return `/projects/${projectId}/chapters/${chapterNumber}`;
@@ -120,6 +120,7 @@ async function ensureActiveArcApproved(projectId: string, chapterNumber: number)
 
 /** Fill the minimum canon needed to write, then return the chapter editor path. */
 export async function ensureWriteReady(projectId: string, chapterNumber = 1): Promise<string> {
+  const project = await api<Project>(`/projects/${projectId}`);
   const people = await api<Character[]>(`/projects/${projectId}/characters`).catch(() => [] as Character[]);
   if (!people.some((item) => item.status === "approved")) {
     for (const person of people) {
@@ -144,7 +145,7 @@ export async function ensureWriteReady(projectId: string, chapterNumber = 1): Pr
     await api(`/projects/${projectId}/chapters/plan`, {
       method: "POST",
       projectId,
-      body: JSON.stringify(defaultPlan(1)),
+      body: JSON.stringify(defaultPlan(1, project.language)),
     });
     return writeHref(projectId, 1);
   }

@@ -167,15 +167,15 @@ class DistillationExecutor:
         )
         return result.model_dump()
 
-    async def inject(self, provider: LLMProvider, profile: dict[str, Any], project: dict[str, Any]) -> dict[str, Any]:
-        prompt = load_prompt("research/inject.yaml")
+    async def generate_framework_proposal(self, provider: LLMProvider, profile: dict[str, Any], project: dict[str, Any]) -> dict[str, Any]:
+        prompt = load_prompt("research/framework_proposal.yaml")
         rendered = render_prompt(
             prompt,
             project=dump_prompt_value(project),
             profile=dump_prompt_value(profile),
         )
         result, _ = await provider.generate_json(
-            [ChatMessage(role="system", content=rendered), ChatMessage(role="user", content="Return the original project proposal now.")],
+            [ChatMessage(role="system", content=rendered), ChatMessage(role="user", content="Return the framework proposal now.")],
             InjectionProposal,
             temperature=0.55,
         )

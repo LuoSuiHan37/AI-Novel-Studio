@@ -58,6 +58,7 @@ from novel_engine.style.canon import scan_context_alignment
 from novel_engine.style.commercial import scan_commercial_quality
 from novel_engine.style.chapter_repetition import scan_chapter_repetition
 from novel_engine.style.chapter_relevance import scan_chapter_relevance
+from novel_engine.style.completeness import escalate_verdict, scan_prose_completeness
 from novel_engine.style.memory_continuity import scan_scene_handoffs
 from novel_engine.workflows.agent_workflow import AgentWorkflow, ChapterPassBundle
 from novel_engine.workflows.context import (
@@ -259,6 +260,11 @@ class ChapterGenerationPipeline:
             if previous is None:
                 raise InvalidStateError(
                     f"chapter {chapter_number - 1} must exist before generating chapter {chapter_number}"
+                )
+            if previous.status not in {ChapterStatus.APPROVED, ChapterStatus.PUBLISHED} or not previous.content.strip():
+                raise InvalidStateError(
+                    f"chapter {chapter_number - 1} must have non-empty approved prose "
+                    f"before chapter {chapter_number} can be generated"
                 )
         bible = await self.engine.story_bibles.get(project_id)
         if bible is None:
@@ -473,12 +479,20 @@ class ChapterGenerationPipeline:
             signals=loaded.style.signals(),
         )
         alignment_findings = scan_context_alignment(prose=prose, context=loaded.writer_context)
+        completeness_findings = scan_prose_completeness(prose)
         continuity = ContinuityOutput(
-            overall=bundle.continuity.output.overall,
+            overall=escalate_verdict(bundle.continuity.output.overall, [
+                *bundle.continuity.output.findings,
+                *signal_findings,
+                *alignment_findings,
+                *completeness_findings,
+                *scan_commercial_quality(prose=prose, context=loaded.writer_context),
+            ]),
             findings=[
                 *bundle.continuity.output.findings,
                 *signal_findings,
                 *alignment_findings,
+                *completeness_findings,
                 *scan_commercial_quality(prose=prose, context=loaded.writer_context),
             ],
         )
@@ -721,10 +735,11 @@ class ChapterGenerationPipeline:
                 signals=loaded.style.signals(),
             ),
             *scan_context_alignment(prose=prose, context=loaded.writer_context),
+            *scan_prose_completeness(prose),
             *scan_commercial_quality(prose=prose, context=loaded.writer_context),
         ]
         continuity = ContinuityOutput(
-            overall=continuity_result.output.overall,
+            overall=escalate_verdict(continuity_result.output.overall, findings),
             findings=findings,
         )
         secondary = None

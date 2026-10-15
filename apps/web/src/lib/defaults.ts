@@ -66,7 +66,37 @@ export const DEFAULT_CAST = [
   },
 ];
 
-export function defaultPlan(chapterNumber: number) {
+export function defaultPlan(chapterNumber: number, language = "en") {
+  if (language.toLowerCase() === "zh" || language.toLowerCase() === "zh-cn") {
+    return {
+      chapter_number: chapterNumber,
+      chapter_title: chapterNumber === 1 ? "公开拒绝" : `第${chapterNumber}章`,
+      pov: "第三人称限知",
+      location: "月岭庄园大厅",
+      characters: ["Aria", "Kael"],
+      chapter_goal: "完成本章核心冲突并推动复仇主线。",
+      conflict: "权力与关系发生正面冲突。",
+      emotional_arc: "屈辱转为冷静。",
+      new_information: "理事会早已预料到这场冲突。",
+      reveal: "主角拒绝乞求。",
+      foreshadowing: "陌生人叫出了她的真实身份。",
+      setup: "众人见证关键选择。",
+      payoff: "主角带着新的决定离开。",
+      cliffhanger: "黑暗中有人叫她公主。",
+      scenes: [{
+        scene_number: 1,
+        location: "大厅高台",
+        characters: ["Aria", "Kael"],
+        goal: "让主角体面离开。",
+        conflict: "所有人都在等待她崩溃。",
+        turning_point: "她没有哭，反而笑了。",
+        dialogue_goal: "留下具有反击意味的一句话。",
+        emotion: "冷意压住怒火",
+        information_revealed: "她早已预料到这一幕。",
+        ending: "她穿过火炬离开。",
+      }],
+    };
+  }
   return {
     chapter_number: chapterNumber,
     chapter_title: chapterNumber === 1 ? "The Rejection" : `Untitled Chapter ${chapterNumber}`,

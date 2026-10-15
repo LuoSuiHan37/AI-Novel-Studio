@@ -18,7 +18,7 @@ class StoryBibleService:
         await require_project(self._uow, project_id)
         return await self._uow.story_bibles.get_by_project(project_id)
 
-    async def upsert(self, bible: StoryBible) -> StoryBible:
+    async def upsert(self, bible: StoryBible, *, commit: bool = True) -> StoryBible:
         await require_project(self._uow, bible.project_id)
         _validate_bible(bible)
         existing = await self._uow.story_bibles.get_by_project(bible.project_id)
@@ -26,7 +26,8 @@ class StoryBibleService:
             bible.id = existing.id
         bible.status = ApprovalStatus.APPROVED
         saved = await self._uow.story_bibles.save(bible)
-        await self._uow.commit()
+        if commit:
+            await self._uow.commit()
         return saved
 
     async def submit_for_review(self, project_id: uuid.UUID) -> StoryBible:

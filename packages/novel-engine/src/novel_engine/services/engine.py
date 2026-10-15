@@ -50,7 +50,7 @@ class NovelEngine:
     async def get_project(self, project_id) -> NovelProject:
         return await require_project(self.uow, project_id)
 
-    async def update_project(self, project: NovelProject) -> NovelProject:
+    async def update_project(self, project: NovelProject, *, commit: bool = True) -> NovelProject:
         current = await require_project(self.uow, project.id)
         saved = await self.uow.projects.save(
             current.model_copy(
@@ -67,7 +67,8 @@ class NovelEngine:
                 }
             )
         )
-        await self.uow.commit()
+        if commit:
+            await self.uow.commit()
         return saved
 
     async def delete_project(self, project_id) -> None:

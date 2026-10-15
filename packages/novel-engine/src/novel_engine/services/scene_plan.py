@@ -22,14 +22,15 @@ class ScenePlanService:
         await self._require_plan(chapter_plan_id)
         return await self._uow.scene_plans.list_by_plan(chapter_plan_id)
 
-    async def create(self, scene: ScenePlan) -> ScenePlan:
+    async def create(self, scene: ScenePlan, *, commit: bool = True) -> ScenePlan:
         plan = await self._require_plan(scene.chapter_plan_id)
         _validate_scene(scene)
         existing = await self._uow.scene_plans.list_by_plan(scene.chapter_plan_id)
         if any(item.scene_number == scene.scene_number for item in existing):
             raise DuplicateError(f"scene_number already used: {scene.scene_number}")
         saved = await self._uow.scene_plans.save(scene)
-        await self._uow.commit()
+        if commit:
+            await self._uow.commit()
         return saved
 
     async def update(self, scene: ScenePlan) -> ScenePlan:

@@ -256,6 +256,11 @@ def test_project_story_character_world_plot_arc_chapter_memory_settings() -> Non
 
             plan = client.post(f"/projects/{project_id}/chapters/plan", json=PLAN)
             assert plan.status_code == 201
+            assert client.post(f"/projects/{project_id}/chapters/1/plan/submit").status_code == 200
+            assert client.post(
+                f"/projects/{project_id}/chapters/1/plan/approve",
+                json={"confirmed_by": "writer"},
+            ).status_code == 200
             chapters = client.get(f"/projects/{project_id}/chapters")
             assert chapters.status_code == 200
             assert chapters.json()[0]["chapter_number"] == 1

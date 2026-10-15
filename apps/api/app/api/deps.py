@@ -4,7 +4,7 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Request
 from pydantic import BaseModel, SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +32,26 @@ class Actor(BaseModel):
     is_authenticated: bool
 
 
+def _request_project_id(request: Request, header_value: str | None) -> uuid.UUID | None:
+    """Use the route project as the authority for project-scoped provider config."""
+    route_value = request.path_params.get("project_id")
+    route_id = None
+    if route_value is not None:
+        try:
+            route_id = uuid.UUID(str(route_value))
+        except ValueError as exc:
+            raise InvalidStateError("invalid project id in request path") from exc
+    if header_value:
+        try:
+            header_id = uuid.UUID(header_value)
+        except ValueError as exc:
+            raise InvalidStateError("invalid X-Project-ID header") from exc
+        if route_id is not None and header_id != route_id:
+            raise InvalidStateError("X-Project-ID does not match the project in the request path")
+        return header_id
+    return route_id
+
+
 async def get_engine(session: Annotated[AsyncSession, Depends(get_db)]) -> NovelEngine:
     return NovelEngine(SqlAlchemyUnitOfWork(session))
 
@@ -48,6 +68,7 @@ async def get_actor(
 
 
 async def get_llm_provider(
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     session: Annotated[AsyncSession, Depends(get_db)],
     x_project_id: Annotated[str | None, Header()] = None,
@@ -57,17 +78,13 @@ async def get_llm_provider(
     x_llm_provider: Annotated[str | None, Header()] = None,
 ) -> LLMProvider:
     row = None
-    if x_project_id:
-        try:
-            project_id = uuid.UUID(x_project_id)
-        except ValueError:
-            project_id = None
-        else:
-            row = await session.scalar(
-                select(LLMConfig)
-                .where(LLMConfig.project_id == project_id)
-                .order_by(LLMConfig.is_default.desc())
-            )
+    project_id = _request_project_id(request, x_project_id)
+    if project_id is not None:
+        row = await session.scalar(
+            select(LLMConfig)
+            .where(LLMConfig.project_id == project_id)
+            .order_by(LLMConfig.is_default.desc())
+        )
     config = provider_config_from_settings(settings, row=row)
     updates: dict = {}
     if x_llm_provider:
@@ -91,6 +108,7 @@ async def get_llm_provider(
 
 
 async def get_optional_llm_provider(
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     session: Annotated[AsyncSession, Depends(get_db)],
     x_project_id: Annotated[str | None, Header()] = None,
@@ -101,17 +119,13 @@ async def get_optional_llm_provider(
 ) -> LLMProvider | None:
     """Build a provider when configured, but allow non-LLM research stages to run."""
     row = None
-    if x_project_id:
-        try:
-            project_id = uuid.UUID(x_project_id)
-        except ValueError:
-            project_id = None
-        else:
-            row = await session.scalar(
-                select(LLMConfig)
-                .where(LLMConfig.project_id == project_id)
-                .order_by(LLMConfig.is_default.desc())
-            )
+    project_id = _request_project_id(request, x_project_id)
+    if project_id is not None:
+        row = await session.scalar(
+            select(LLMConfig)
+            .where(LLMConfig.project_id == project_id)
+            .order_by(LLMConfig.is_default.desc())
+        )
     config = provider_config_from_settings(settings, row=row)
     if x_llm_api_key:
         config = config.model_copy(update={"api_key": SecretStr(x_llm_api_key)})
@@ -134,6 +148,7 @@ async def get_workflow(provider: Annotated[LLMProvider, Depends(get_llm_provider
 
 
 async def get_review_workflow(
+    request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
     session: Annotated[AsyncSession, Depends(get_db)],
     x_project_id: Annotated[str | None, Header()] = None,
@@ -162,17 +177,13 @@ async def get_review_workflow(
     if config is None:
         return None
     generation_row = None
-    if x_project_id:
-        try:
-            project_id = uuid.UUID(x_project_id)
-        except ValueError:
-            project_id = None
-        else:
-            generation_row = await session.scalar(
-                select(LLMConfig)
-                .where(LLMConfig.project_id == project_id)
-                .order_by(LLMConfig.is_default.desc())
-            )
+    project_id = _request_project_id(request, x_project_id)
+    if project_id is not None:
+        generation_row = await session.scalar(
+            select(LLMConfig)
+            .where(LLMConfig.project_id == project_id)
+            .order_by(LLMConfig.is_default.desc())
+        )
     generation_config = provider_config_from_settings(settings, row=generation_row)
     generation_updates: dict = {}
     if x_llm_provider:

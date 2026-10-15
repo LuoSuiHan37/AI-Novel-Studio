@@ -22,9 +22,12 @@ export type PlatformCheck = {
   detail: string;
 };
 
-function wordCount(text: string): number {
+export function countTextUnits(text: string): number {
   const trimmed = text.trim();
   if (!trimmed) return 0;
+  if (/[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(trimmed)) {
+    return Array.from(trimmed).filter((char) => !/\s/.test(char)).length;
+  }
   return trimmed.split(/\s+/).length;
 }
 
@@ -34,8 +37,12 @@ export function evaluateAlphaNovelChecks(input: {
   emotionalArc?: string;
   cliffhanger?: string;
   chapterGoal?: string;
+  wordMin?: number;
+  wordMax?: number;
 }): PlatformCheck[] {
-  const words = wordCount(input.prose);
+  const wordMin = input.wordMin ?? ALPHANOVEL_RULES.wordMin;
+  const wordMax = input.wordMax ?? ALPHANOVEL_RULES.wordMax;
+  const words = countTextUnits(input.prose);
   const paragraphs = input.prose
     .split(/\n\s*\n/)
     .map((p) => p.trim())
@@ -43,7 +50,7 @@ export function evaluateAlphaNovelChecks(input: {
   const avgParagraphWords =
     paragraphs.length === 0
       ? 0
-      : Math.round(paragraphs.reduce((sum, p) => sum + wordCount(p), 0) / paragraphs.length);
+      : Math.round(paragraphs.reduce((sum, p) => sum + countTextUnits(p), 0) / paragraphs.length);
 
   const phraseHits = ALPHANOVEL_RULES.monitoredPhrases
     .map((phrase) => {
@@ -57,7 +64,7 @@ export function evaluateAlphaNovelChecks(input: {
   const hasEmotion =
     Boolean((input.emotionalArc || "").trim()) ||
     /\b(hurt|rage|desire|shame|bond|heart)\b/i.test(input.prose);
-  const hasProgress = Boolean((input.chapterGoal || "").trim()) || words >= ALPHANOVEL_RULES.wordMin;
+  const hasProgress = Boolean((input.chapterGoal || "").trim()) || words >= wordMin;
   const hasHook =
     Boolean((input.cliffhanger || "").trim()) ||
     /\?\s*$/.test(input.prose.trim()) ||
@@ -66,9 +73,9 @@ export function evaluateAlphaNovelChecks(input: {
   return [
     {
       id: "words",
-      label: "章长 1500–2500 词",
-      ok: words >= ALPHANOVEL_RULES.wordMin && words <= ALPHANOVEL_RULES.wordMax,
-      detail: words === 0 ? "尚无正文" : `当前约 ${words} 词`,
+      label: `章长 ${wordMin}–${wordMax} 计数单位`,
+      ok: words >= wordMin && words <= wordMax,
+      detail: words === 0 ? "尚无正文" : `当前约 ${words} 个计数单位`,
     },
     {
       id: "paragraphs",

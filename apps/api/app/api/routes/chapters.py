@@ -60,6 +60,7 @@ from novel_engine.style.canon import scan_context_alignment
 from novel_engine.style.commercial import scan_commercial_quality
 from novel_engine.style.chapter_repetition import scan_book_repetition, scan_chapter_repetition
 from novel_engine.style.chapter_relevance import scan_chapter_relevance
+from novel_engine.style.completeness import escalate_verdict, scan_prose_completeness
 from novel_engine.style.word_count import count_text_units
 from novel_engine.style.signals import scan_continuity_signals
 from novel_engine.agents.contracts import ChapterPlannerInput, ContinuityInput, EditorInput, OutlineOutput, ReviseInput
@@ -70,6 +71,23 @@ router = APIRouter(tags=["chapters"])
 
 def _content_fingerprint(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _chapter_length_check(project, prose: str) -> dict:
+    style = resolve_style_bundle(
+        platform_id=project.target_platform,
+        novel_id=project.genre,
+        language=project.language,
+    )
+    count = count_text_units(prose)
+    minimum = style.platform.chapter_word_min
+    maximum = style.platform.chapter_word_max
+    return {
+        "count": count,
+        "minimum": minimum,
+        "maximum": maximum,
+        "ok": minimum <= count <= maximum,
+    }
 
 
 def _apply_chapter_budgets(proposal, *, minimum: int, maximum: int):
@@ -427,6 +445,14 @@ async def novel_audit(
                 "chapter_number": chapter.chapter_number,
                 **relevance.model_dump(),
             })
+        completeness = scan_prose_completeness(chapter.content)
+        if completeness:
+            relevance_findings.append({
+                "chapter_number": chapter.chapter_number,
+                "status": "blocked",
+                "blocked": True,
+                "completeness_findings": [item.model_dump(mode="json") for item in completeness],
+            })
     chapter_memories: dict[int, dict] = {}
     memory_rows = []
     session = getattr(engine.uow, "session", None)
@@ -446,6 +472,12 @@ async def novel_audit(
         chapter_memories=chapter_memories,
         target_chapter_count=target,
     )
+    approved_chapter_numbers = {
+        item.chapter_number
+        for item in chapters
+        if item.status.value in {"approved", "published"}
+    }
+    missing_memory = sorted(approved_chapter_numbers - set(chapter_memories))
     timeline_rows = []
     if isinstance(session, AsyncSession):
         timeline_rows = (
@@ -474,6 +506,11 @@ async def novel_audit(
         chapter_numbers=chapter_id_numbers,
         latest_approved_chapter=latest_approved,
     )
+    length_findings = [
+        {"chapter_number": item.chapter_number, **_chapter_length_check(project, item.content)}
+        for item in chapters
+        if item.content.strip() and not _chapter_length_check(project, item.content)["ok"]
+    ]
     blocked = bool(
         missing
         or overflow
@@ -486,6 +523,8 @@ async def novel_audit(
         or any(item.severity is ContinuityVerdict.ERROR for item in longitudinal_findings)
         or any(item.severity is ContinuityVerdict.ERROR for item in story_state_findings)
         or any(item.severity is ContinuityVerdict.ERROR for item in plot_thread_findings)
+        or length_findings
+        or missing_memory
     )
     return {
         "status": "blocked" if blocked else "passed",
@@ -503,15 +542,16 @@ async def novel_audit(
         "longitudinal_findings": [item.model_dump(mode="json") for item in longitudinal_findings],
         "story_state_findings": [item.model_dump(mode="json") for item in story_state_findings],
         "plot_thread_findings": [item.model_dump(mode="json") for item in plot_thread_findings],
+        "length_findings": length_findings,
+        "missing_memory": missing_memory,
         "plot_thread_coverage": {
             "open_hooks": sum(item.status.value not in {"resolved", "dropped"} for item in hooks),
             "open_foreshadowings": sum(item.status.value not in {"paid_off", "missed", "dropped"} for item in foreshadowings),
         },
         "memory_coverage": {
             "chapters_with_memory": len(chapter_memories),
-            "approved_chapters": sum(
-                item.status.value in {"approved", "published"} for item in chapters
-            ),
+            "approved_chapters": len(approved_chapter_numbers),
+            "missing_chapters": missing_memory,
         },
     }
 
@@ -605,7 +645,8 @@ async def create_chapter_plan(
             target_word_count=body.target_word_count or 0,
             target_word_min=body.target_word_min or 0,
             target_word_max=body.target_word_max or 0,
-        )
+        ),
+        auto_approve=False,
     )
     scenes = []
     for item in body.scenes:
@@ -742,6 +783,8 @@ async def generate_chapter(
     if body.persist:
         chapter_row = await engine.chapters.get_by_number(project_id, number)
         metadata = dict(chapter_row.extra_metadata or {})
+        project = await engine.get_project(project_id)
+        length_check = _chapter_length_check(project, chapter_row.content)
         commercial = result.secondary_commercial
         commercial_blocked = review_workflow is not None and (
             commercial is None
@@ -757,6 +800,7 @@ async def generate_chapter(
                 if result.continuity.overall is ContinuityVerdict.ERROR
                 or result.bundle.editor.output.needs_human_review
                 or commercial_blocked
+                or not result.length_ok
                 else "completed" if review_workflow is not None else "not_configured"
             ),
             "versions": [item.model_dump() for item in result.versions],
@@ -765,6 +809,7 @@ async def generate_chapter(
             "independent_review": getattr(review_workflow, "provider_identity", None),
             "independent_commercial": commercial.model_dump() if commercial else None,
             "content_fingerprint": _content_fingerprint(chapter_row.content),
+            "length_check": length_check,
         }
         await engine.chapters.update(chapter_row.model_copy(update={"extra_metadata": metadata}))
         await save_project_snapshot(engine, project_id)
@@ -776,6 +821,7 @@ async def generate_chapter(
         and not result.repetition_check.get("blocked", False)
         and not result.relevance_check.get("blocked", False)
         and not result.bundle.editor.output.needs_human_review
+        and result.length_ok
         and not commercial_blocked
     ):
         # Automatic mode keeps the same audit gates but records the approval
@@ -1049,6 +1095,8 @@ async def generate_chapter_stream(
             prose = _clean_streamed_prose("".join(chunks))
             if not prose:
                 raise InvalidStateError("AI 没有返回有效正文")
+            project = await engine.get_project(project_id)
+            length_check = _chapter_length_check(project, prose)
             yield _sse_event("stage", {"stage": "finalizing", "message": "正文已生成，正在保存候选版本"})
             repetition = scan_chapter_repetition(
                 chapter_number=number,
@@ -1073,7 +1121,7 @@ async def generate_chapter_stream(
                 metadata = dict(chapter_row.extra_metadata or {})
                 metadata["audit"] = {
                     **(metadata.get("audit") or {}),
-                    "status": "streamed",
+                    "status": "streamed" if length_check["ok"] else "length_failed",
                     "versions": [{
                         "version": 1,
                         "prose": prose,
@@ -1083,6 +1131,7 @@ async def generate_chapter_stream(
                         "accepted": True,
                     }],
                     "content_fingerprint": _content_fingerprint(chapter_row.content),
+                    "length_check": length_check,
                 }
                 await engine.chapters.update(chapter_row.model_copy(update={"extra_metadata": metadata}))
                 await save_project_snapshot(engine, project_id)
@@ -1094,7 +1143,13 @@ async def generate_chapter_stream(
                 "continuity": {"overall": "pending"},
                 "review_status": "streaming_complete",
                 "versions": [{"version": 1, "prose": prose, "word_count": count_text_units(prose), "score": None, "selected": True, "accepted": True}],
-                "length_warning": None,
+                "length_warning": (
+                    None
+                    if length_check["ok"]
+                    else f"正文当前为 {length_check['count']}，目标范围为 "
+                    f"{length_check['minimum']}-{length_check['maximum']}"
+                ),
+                "length_check": length_check,
                 "repetition_check": repetition_payload,
                 "relevance_check": relevance_payload,
                 "auto_approved": False,
@@ -1122,6 +1177,7 @@ async def review_chapter(
     context = await _writer_context(engine, project_id, number)
     chapter = await engine.chapters.get_by_number(project_id, number)
     project = await engine.get_project(project_id)
+    length_check = _chapter_length_check(project, chapter.content)
     if not chapter.content.strip():
         raise InvalidStateError("cannot review an empty chapter")
     repetition_check = scan_chapter_repetition(
@@ -1132,13 +1188,19 @@ async def review_chapter(
     plan = await engine.uow.chapter_plans.latest_for_chapter(chapter.id)
     scenes = await engine.scene_plans.list(plan.id) if plan else []
     relevance_check = scan_chapter_relevance(content=chapter.content, plan=plan, scenes=scenes) if plan else None
-    if repetition_check.blocked or (relevance_check and relevance_check.blocked) or plan is None:
+    if (
+        repetition_check.blocked
+        or (relevance_check and relevance_check.blocked)
+        or plan is None
+        or not length_check["ok"]
+    ):
         metadata = dict(chapter.extra_metadata or {})
         metadata["audit"] = {
             **(metadata.get("audit") or {}),
             "status": "failed",
             "repetition_check": repetition_check.model_dump(),
             "relevance_check": relevance_check.model_dump() if relevance_check else {"status": "missing_plan", "blocked": True},
+            "length_check": length_check,
         }
         blocked = await engine.chapters.update(chapter.model_copy(update={"extra_metadata": metadata}))
         return {
@@ -1146,8 +1208,10 @@ async def review_chapter(
             "reviewed": False,
             "blocked_by_repetition": repetition_check.blocked,
             "blocked_by_relevance": bool(plan is None or (relevance_check and relevance_check.blocked)),
+            "blocked_by_length": not length_check["ok"],
             "repetition_check": repetition_check,
             "relevance_check": relevance_check,
+            "length_check": length_check,
             "review_status": "failed",
         }
     result = await workflow.editor.run(EditorInput(context=context, prose=chapter.content))
@@ -1163,7 +1227,21 @@ async def review_chapter(
     )
     alignment = scan_context_alignment(prose=chapter.content, context=context)
     continuity = ContinuityOutput(
-        overall=continuity_result.output.overall,
+        overall=escalate_verdict(continuity_result.output.overall, [
+            *continuity_result.output.findings,
+            *scan_continuity_signals(
+                prose=chapter.content,
+                world_rules=list(context.world_rules),
+                signals=resolve_style_bundle(
+                    platform_id=project.target_platform,
+                    novel_id=project.genre,
+                    language=project.language,
+                ).signals(),
+            ),
+            *alignment,
+            *scan_commercial_quality(prose=chapter.content, context=context),
+            *scan_prose_completeness(chapter.content),
+        ]),
         findings=[
             *continuity_result.output.findings,
             *scan_continuity_signals(
@@ -1177,6 +1255,7 @@ async def review_chapter(
             ),
             *alignment,
             *scan_commercial_quality(prose=chapter.content, context=context),
+            *scan_prose_completeness(chapter.content),
         ],
     )
     secondary = None
@@ -1187,7 +1266,7 @@ async def review_chapter(
             )
         ).output
         continuity = ContinuityOutput(
-            overall=continuity.overall,
+            overall=escalate_verdict(continuity.overall, [*continuity.findings, *secondary.findings]),
             findings=[*continuity.findings, *secondary.findings],
         )
     editor_blocked = result.output.needs_human_review or any(
@@ -1207,7 +1286,7 @@ async def review_chapter(
             or commercial.ai_style_risk_score < 5
         )
     )
-    if continuity.overall is ContinuityVerdict.ERROR or editor_blocked or commercial_blocked:
+    if continuity.overall is ContinuityVerdict.ERROR or editor_blocked or commercial_blocked or not length_check["ok"]:
         session = getattr(engine.uow, "session", None)
         if isinstance(session, AsyncSession):
             for finding in continuity.findings:
@@ -1227,6 +1306,7 @@ async def review_chapter(
             "status": "failed",
             "independent_review": getattr(review_workflow, "provider_identity", None),
             "independent_commercial": commercial.model_dump() if commercial else None,
+            "length_check": length_check,
         }
         await engine.chapters.update(chapter.model_copy(update={"extra_metadata": metadata}))
         return {
@@ -1241,6 +1321,7 @@ async def review_chapter(
             "blocked_by_continuity": continuity.overall is ContinuityVerdict.ERROR,
             "blocked_by_editor": editor_blocked,
             "blocked_by_commercial": commercial_blocked,
+            "blocked_by_length": not length_check["ok"],
         }
     metadata = dict(chapter.extra_metadata or {})
     metadata["audit"] = {
@@ -1249,6 +1330,7 @@ async def review_chapter(
         "independent_review": getattr(review_workflow, "provider_identity", None),
         "independent_commercial": commercial.model_dump() if commercial else None,
         "content_fingerprint": _content_fingerprint(chapter.content),
+        "length_check": length_check,
     }
     await engine.chapters.update(chapter.model_copy(update={"extra_metadata": metadata}))
     # Persist audit metadata before changing the lifecycle state. The chapter
@@ -1316,12 +1398,19 @@ async def continuity_chapter(
         signals=style.signals(),
     )
     continuity = ContinuityOutput(
-        overall=result.output.overall,
+        overall=escalate_verdict(result.output.overall, [
+            *result.output.findings,
+            *alignment,
+            *local_signals,
+            *scan_commercial_quality(prose=chapter.content, context=context),
+            *scan_prose_completeness(chapter.content),
+        ]),
         findings=[
             *result.output.findings,
             *alignment,
             *local_signals,
             *scan_commercial_quality(prose=chapter.content, context=context),
+            *scan_prose_completeness(chapter.content),
         ],
     )
     secondary = None
@@ -1388,8 +1477,14 @@ async def approve_chapter(
         raise InvalidStateError("未完成独立审查，不能批准章节")
     chapter = await engine.chapters.get_by_number(project_id, number)
     audit = dict(chapter.extra_metadata or {}).get("audit") or {}
+    length_check = _chapter_length_check(await engine.get_project(project_id), chapter.content)
     if audit.get("status") != "passed":
         raise InvalidStateError("当前章节没有通过独立审查，不能批准")
+    if not length_check["ok"]:
+        raise InvalidStateError(
+            f"当前章节字数为 {length_check['count']}，必须在 "
+            f"{length_check['minimum']}-{length_check['maximum']} 范围内才能批准"
+        )
     if audit.get("content_fingerprint") != _content_fingerprint(chapter.content):
         raise InvalidStateError("独立审查针对的正文版本已变化，请重新审查")
     pipeline = await _pipeline(engine, workflow, project_id, review_workflow=review_workflow)

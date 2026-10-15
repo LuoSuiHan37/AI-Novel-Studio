@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Field, StatusBanner } from "@/components/ui-bits";
@@ -24,7 +24,7 @@ export default function ArcsPage() {
   const [busy, setBusy] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     const arcs = await api<StoryArc[]>(`/projects/${projectId}/arcs`);
     setItems(arcs);
     // Research injection may already seed arcs 1..N. New arcs should start
@@ -32,13 +32,16 @@ export default function ArcsPage() {
     // default of 1 and triggering the uniqueness guard.
     const nextSequence = arcs.reduce((max, item) => Math.max(max, item.sequence), 0) + 1;
     setSequence(String(nextSequence));
-  }
+  }, [projectId]);
 
   useEffect(() => {
-    load()
-      .catch((err: ApiError) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [projectId]);
+    const timer = window.setTimeout(() => {
+      void load()
+        .catch((err: ApiError) => setError(err.message))
+        .finally(() => setLoading(false));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
 
   async function createAndConfirm() {
     setBusy(true);

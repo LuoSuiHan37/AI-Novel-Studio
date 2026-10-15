@@ -24,7 +24,7 @@ class CharacterService:
         await require_project(self._uow, project_id)
         return await self._uow.characters.list_by_project(project_id)
 
-    async def create(self, character: Character) -> Character:
+    async def create(self, character: Character, *, commit: bool = True) -> Character:
         await require_project(self._uow, character.project_id)
         _validate_character(character)
         existing = await self._uow.characters.list_by_project(character.project_id)
@@ -34,7 +34,8 @@ class CharacterService:
         # A valid character becomes available immediately after creation.
         character.status = ApprovalStatus.APPROVED
         saved = await self._uow.characters.save(character)
-        await self._uow.commit()
+        if commit:
+            await self._uow.commit()
         return saved
 
     async def update(self, character: Character) -> Character:
