@@ -29,10 +29,12 @@ class IdeaInput(AgentModel):
 
 class IdeaOutput(AgentModel):
     working_title: str
+    title_candidates: list[str] = Field(default_factory=list)
     logline: str
     premise: str
     theme: str = ""
     synopsis: str = ""
+    synopsis_variants: list[str] = Field(default_factory=list)
     tropes: list[str]
     series_hooks: list[str]
     risks: list[str]

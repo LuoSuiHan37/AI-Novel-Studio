@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Response, status
 from app.api.deps import Actor, confirmed_by, get_actor, get_engine, get_review_workflow, get_workflow
 from app.api.schemas import ActorOut, ConfirmBody, ProjectCreate, ProjectTitleSuggest, ProjectUpdate
 from app.services.book_snapshot import save_project_snapshot
+from app.services.creative_quality import rank_creative_candidates
 from app.services.prompt_optimization import optimization_report
 from novel_engine.agents.contracts import IdeaInput
 from novel_engine.creative.profile import compile_creative_profile
@@ -93,16 +94,25 @@ async def suggest_project_title(
             ),
         )
     )
-    title = result.output.working_title.strip()
+    title_options = rank_creative_candidates(
+        [result.output.working_title, *result.output.title_candidates],
+        existing=existing_titles,
+    )
+    title = (title_options[0]["text"] if title_options else result.output.working_title.strip())
     duplicate = any(item.casefold() == title.casefold() for item in existing_titles)
+    synopsis_options = [item.strip() for item in result.output.synopsis_variants if item.strip()]
+    if result.output.synopsis.strip() and result.output.synopsis.strip() not in synopsis_options:
+        synopsis_options.insert(0, result.output.synopsis.strip())
     return {
         "title": title,
         "available": not duplicate,
+        "title_candidates": title_options,
         "existing_titles": existing_titles,
         "premise": result.output.premise,
         "theme": result.output.theme or result.output.premise,
         "logline": result.output.logline,
-        "synopsis": result.output.synopsis or result.output.premise,
+        "synopsis": synopsis_options[0] if synopsis_options else (result.output.synopsis or result.output.premise),
+        "synopsis_variants": synopsis_options,
         "reading_tags": result.output.reading_tags,
         "content_tags": result.output.content_tags,
         "protagonist_names": result.output.protagonist_names,
@@ -152,9 +162,19 @@ async def suggest_existing_project_title(
             brief=brief,
         )
     )
-    title = result.output.working_title.strip()
-    available = not any(item.title.casefold() == title.casefold() for item in await engine.list_projects())
-    return {"title": title, "available": available, "current_title": project.title}
+    existing_titles = [item.title for item in await engine.list_projects() if item.id != project.id]
+    title_options = rank_creative_candidates(
+        [result.output.working_title, *result.output.title_candidates],
+        existing=[project.title, *existing_titles],
+    )
+    title = title_options[0]["text"] if title_options else result.output.working_title.strip()
+    available = not any(item.casefold() == title.casefold() for item in [project.title, *existing_titles])
+    return {
+        "title": title,
+        "available": available,
+        "current_title": project.title,
+        "title_candidates": title_options,
+    }
 
 
 @router.get("/me", response_model=ActorOut)

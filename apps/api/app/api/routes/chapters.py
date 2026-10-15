@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +25,7 @@ from app.api.deps import (
 )
 from app.api.schemas import ChapterPatch, ChapterPlanCreate, ChapterPlanSuggest, ConfirmBody, GenerateBody, ProposeEditBody
 from app.services.book_snapshot import save_project_snapshot
+from app.services.creative_quality import rank_creative_candidates
 from app.services.prompt_optimization import chapter_optimization_signals
 from app.db.models.chapter import ChapterSummary
 from app.db.models.memory import StoryMemory, TimelineEvent
@@ -120,6 +121,7 @@ class ChapterTitleSuggestion(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str
+    candidates: list[str] = Field(default_factory=list)
 
 
 @router.get("/projects/{project_id}/chapters")
@@ -592,10 +594,12 @@ async def suggest_chapter_title(
             ChatMessage(
                 role="system",
                 content=(
-                    "You are a fiction editor naming a chapter. Create one concise, memorable "
+                    "You are a fiction editor naming a chapter. Create 5 distinct concise, memorable "
                     "chapter title in the same language and style as the novel. Use the supplied "
                     f"story and previous chapter context. The novel output language is {project.language}; "
-                    "write the title entirely in that language. Return only the requested JSON."
+                    "write every title entirely in that language. Vary conflict, mystery, reversal, "
+                    "emotion, and a concrete event. Do not use generic labels or reveal the whole ending. "
+                    "Return JSON with title and candidates only."
                 ),
             ),
             ChatMessage(
@@ -604,18 +608,22 @@ async def suggest_chapter_title(
                     f"Novel title: {project.title}\nGenre: {project.genre}\n"
                     f"Next chapter number: {next_number}\n{story_context}\n"
                     f"Plot outline: {plot_context}\n{previous_context}\n"
-                    "Generate an apt title for the next chapter. The title should not simply be "
-                    "'Chapter N'."
+                    "Generate apt titles for the next chapter. They should not simply be 'Chapter N' "
+                    "and must be grounded in the supplied chapter context."
                 ),
             ),
         ],
         ChapterTitleSuggestion,
         temperature=0.8,
     )
-    title = result.title.strip().strip("\"'“”‘’")
+    ranked = rank_creative_candidates(
+        [result.title, *result.candidates],
+        existing=[item.title for item in chapters],
+    )
+    title = ranked[0]["text"] if ranked else result.title.strip().strip("\"'“”‘’")
     if not title:
         raise InvalidStateError("the model returned an empty chapter title")
-    return {"title": title}
+    return {"title": title, "candidates": ranked}
 
 
 @router.post("/projects/{project_id}/chapters/plan", status_code=status.HTTP_201_CREATED)
