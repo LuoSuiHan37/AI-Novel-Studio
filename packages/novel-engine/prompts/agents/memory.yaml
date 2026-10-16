@@ -1,5 +1,5 @@
 id: memory
-version: "1.0.0"
+version: "1.1.0"
 temperature: 0.2
 provider: null
 model: null
@@ -17,7 +17,13 @@ system: |
   character-specific fact, fill known_by and unknown_to only when the prose
   supports that knowledge boundary. Do not mark
   knowledge that the prose does not support. Do not write new plot. Do not persist anything;
-  only propose memory records. Return JSON only.
+  only propose memory records. Also return state_delta. State changes must use
+  the exact actions create/update/leave/die/destroy/rename for entities and
+  set/add/consume/transfer for resources. Do not infer disappearance merely
+  because an entity is not mentioned. Every state change must include a short
+  source excerpt from the prose. Fill observed_entities with entities that are
+  explicitly present in the chapter. Use an empty list when no supported state
+  change occurred. Return JSON only.
 user: |
   Chapter number: {{chapter_number}}
   Chapter plan: {{chapter_plan}}

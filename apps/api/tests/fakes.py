@@ -93,7 +93,7 @@ def approve_payloads(chapter_number: int = 1, hook: str = "Who called her prince
 
 
 def generate_payloads() -> list[dict]:
-    return [
+    generation = [
         {
             "title": "The Rejection",
             "prose": ("Kael rejected Aria before the pack. " * 300).strip(),
@@ -117,3 +117,5 @@ def generate_payloads() -> list[dict]:
             "foreshadowings": [],
         },
     ]
+    # Persisted generation now runs the system audit/commit chain immediately.
+    return generation + approve_payloads()

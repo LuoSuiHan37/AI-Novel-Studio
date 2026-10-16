@@ -11,6 +11,7 @@ from novel_engine.memory.models import (
     TimelineMemory,
     VectorRecord,
 )
+from novel_engine.models.story_state import StoryState
 from novel_engine.models.enums import MemoryLayer
 
 
@@ -22,6 +23,7 @@ class InMemoryMemoryStore:
         self.chapters: dict[uuid.UUID, dict[int, ChapterMemory]] = defaultdict(dict)
         self.records: dict[uuid.UUID, list[MemoryRecord]] = defaultdict(list)
         self.vectors: dict[uuid.UUID, list[VectorRecord]] = defaultdict(list)
+        self.story_states: dict[uuid.UUID, StoryState] = {}
 
     def set_global(self, memory: GlobalMemory) -> None:
         self.globals[memory.project_id] = memory
@@ -79,3 +81,28 @@ class InMemoryMemoryStore:
 
     def vectors_for(self, project_id: uuid.UUID) -> list[VectorRecord]:
         return list(self.vectors[project_id])
+
+    def set_story_state(self, state: StoryState) -> None:
+        self.story_states[state.project_id] = state
+
+    def story_state(self, project_id: uuid.UUID) -> StoryState | None:
+        return self.story_states.get(project_id)
+
+    def story_state_ledger(self, project_id: uuid.UUID) -> str:
+        state = self.story_state(project_id)
+        if state is None:
+            return "No durable story state has been recorded yet."
+        lines = [f"State after chapter {state.chapter_number}:"]
+        for item in state.entities:
+            lines.append(
+                f"- entity {item.canonical_name} [{item.entity_type}] status={item.status}; "
+                f"location={item.current_location or 'unknown'}; owner={item.owner or 'none'}"
+            )
+        for item in state.resources:
+            lines.append(
+                f"- resource {item.name}: {item.quantity:g} {item.unit}; "
+                f"location={item.location or 'unknown'}; owner={item.owner or 'none'}"
+            )
+        for item in state.relationships:
+            lines.append(f"- relationship {item.subject} {item.relation} {item.object} [{item.status}]")
+        return "\n".join(lines)

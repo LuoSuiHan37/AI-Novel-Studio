@@ -1,5 +1,5 @@
 id: continuity
-version: "1.2.0"
+version: "1.3.0"
 temperature: 0.2
 provider: null
 model: null
@@ -18,7 +18,12 @@ system: |
   chapter's substance. overall must be
   PASS, WARNING, or ERROR. Each finding needs category, problem, evidence,
   recommendation, and severity PASS|WARNING|ERROR. ERROR means a canon break.
-  Do not rewrite the manuscript. Return JSON only.
+  Do not rewrite the manuscript. Also inspect context.story_state_ledger. Look
+  for unexplained entity disappearance, terminal entities returning, resource
+  quantities changing without an evidenced action, ownership/location
+  contradictions, and state changes absent from the prose. Treat a hard
+  contradiction as ERROR and an entity that is merely not mentioned as WARNING
+  unless the prose explicitly claims it is present or absent. Return JSON only.
 user: |
   Context: {{context}}
   Prose: {{prose}}

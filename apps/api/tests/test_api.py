@@ -273,44 +273,9 @@ def test_project_story_character_world_plot_arc_chapter_memory_settings() -> Non
             )
             assert generated.status_code == 200, generated.text
             assert "rejected Aria" in generated.json()["chapter"]["content"]
-
-            app.dependency_overrides[get_llm_provider] = lambda: ScriptedJsonProvider(
-                [editor_payload(), {"overall": "PASS", "findings": []}]
-            )
-            app.dependency_overrides[get_review_workflow] = lambda: AgentWorkflow(
-                ScriptedJsonProvider(
-                    [
-                        {
-                            "reader_pressure_score": 8,
-                            "reader_promise_score": 8,
-                            "rhythm_score": 8,
-                            "ai_style_risk_score": 8,
-                            "needs_human_review": False,
-                            "findings": [],
-                            "repair_priorities": [],
-                        },
-                        {"overall": "PASS", "findings": []},
-                    ]
-                )
-            )
-            reviewed = client.post(f"/projects/{project_id}/chapters/1/review")
-            assert reviewed.status_code == 200
-            assert reviewed.json()["chapter"]["status"] == "reviewed", reviewed.text
-
-            app.dependency_overrides[get_llm_provider] = lambda: ScriptedJsonProvider(
-                [{"overall": "WARNING", "findings": []}]
-            )
-            continuity = client.post(f"/projects/{project_id}/chapters/1/continuity")
-            assert continuity.status_code == 200
-            assert continuity.json()["continuity"]["overall"] == "WARNING"
-
-            app.dependency_overrides[get_llm_provider] = lambda: ScriptedJsonProvider(approve_payloads())
-            approved = client.post(
-                f"/projects/{project_id}/chapters/1/approve",
-                json={"confirmed_by": "editor"},
-            )
-            assert approved.status_code == 200
-            assert approved.json()["status"] == "approved"
+            assert generated.json()["auto_approved"] is True
+            assert generated.json()["review_status"] == "completed"
+            assert generated.json()["chapter"]["status"] == "approved"
             detail = client.get(f"/projects/{project_id}/chapters/1")
             assert detail.status_code == 200
             assert detail.json()["plan"]["chapter_title"] == "The Rejection"

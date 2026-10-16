@@ -12,6 +12,7 @@ from novel_engine.models.enums import (
     NarrativeTense,
     PointOfView,
 )
+from novel_engine.models.story_state import StoryStateDelta
 
 
 class AgentModel(BaseModel):
@@ -235,6 +236,7 @@ class WriterContext(AgentModel):
     novel_constitution: dict = Field(default_factory=dict)
     environment_bible: dict = Field(default_factory=dict)
     relationship_ledger: list[dict] = Field(default_factory=list)
+    story_state_ledger: str = ""
 
 
 class WriterInput(AgentModel):
@@ -385,6 +387,7 @@ class SceneHandoff(AgentModel):
 class MemoryAgentOutput(AgentModel):
     memories: list[MemoryCandidate]
     scene_handoffs: list[SceneHandoff] = Field(default_factory=list)
+    state_delta: StoryStateDelta = Field(default_factory=StoryStateDelta)
 
 
 class HookAgentInput(AgentModel):

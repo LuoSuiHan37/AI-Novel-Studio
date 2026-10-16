@@ -259,12 +259,12 @@ async def project_prompt_optimization(
 async def review_project_readiness(
     project_id: UUID,
     engine: Annotated[NovelEngine, Depends(get_engine)],
+    workflow: Annotated[AgentWorkflow, Depends(get_workflow)],
     review_workflow: Annotated[AgentWorkflow | None, Depends(get_review_workflow)],
 ) -> dict:
-    if review_workflow is None:
-        raise InvalidStateError("请先配置独立审查模型，且不能与生成模型相同")
+    active_review_workflow = review_workflow or workflow
     snapshot = await _project_review_snapshot(engine, project_id)
-    result = await review_workflow.review_project(ProjectReviewInput(project_snapshot=snapshot))
+    result = await active_review_workflow.review_project(ProjectReviewInput(project_snapshot=snapshot))
     project = await engine.get_project(project_id)
     review = {
         "review_type": "project_independent",
@@ -276,7 +276,8 @@ async def review_project_readiness(
         "overall_notes": result.output.overall_notes,
         "prompt_id": result.prompt_id,
         "prompt_version": result.prompt_version,
-        "model": review_workflow.provider_identity,
+        "model": active_review_workflow.provider_identity,
+        "review_mode": "independent" if review_workflow is not None else "system_auto",
     }
     metadata = dict(project.extra_metadata or {})
     reviews = list(metadata.get("quality_reviews") or [])

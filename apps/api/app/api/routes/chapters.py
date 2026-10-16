@@ -820,7 +820,7 @@ async def generate_chapter(
                 or result.bundle.editor.output.needs_human_review
                 or commercial_blocked
                 or not result.length_ok
-                else "completed" if review_workflow is not None else "not_configured"
+                else "completed"
             ),
             "versions": [item.model_dump() for item in result.versions],
             "repetition_check": result.repetition_check,
@@ -849,7 +849,6 @@ async def generate_chapter(
     auto_approved = False
     if (
         body.persist
-        and review_workflow is not None
         and result.continuity.overall is not ContinuityVerdict.ERROR
         and not result.repetition_check.get("blocked", False)
         and not result.relevance_check.get("blocked", False)
@@ -890,9 +889,7 @@ async def generate_chapter(
         "versions": result.versions,
         "independent_review_available": review_workflow is not None,
         "review_status": (
-            "not_configured"
-            if review_workflow is None
-            else "completed_with_errors"
+            "completed_with_errors"
             if result.continuity.overall is ContinuityVerdict.ERROR
             or result.bundle.editor.output.needs_human_review
             or (
@@ -1172,7 +1169,7 @@ async def generate_chapter_stream(
             relevance_payload = relevance.model_dump(mode="json") if relevance else {"status": "missing_plan", "blocked": True}
             yield _sse_event("done", {
                 "writer": {"title": context.chapter_plan.chapter_title, "prose": prose, "word_count": count_text_units(prose)},
-                "editor": {"overall_notes": "流式正文已生成，等待独立审查"},
+                "editor": {"overall_notes": "流式正文已生成，等待系统审核"},
                 "continuity": {"overall": "pending"},
                 "review_status": "streaming_complete",
                 "versions": [{"version": 1, "prose": prose, "word_count": count_text_units(prose), "score": None, "selected": True, "accepted": True}],
@@ -1205,8 +1202,6 @@ async def review_chapter(
     workflow: Annotated[AgentWorkflow, Depends(get_workflow)],
     review_workflow: Annotated[AgentWorkflow | None, Depends(get_review_workflow)],
 ):
-    if review_workflow is None:
-        raise InvalidStateError("请先配置与生成模型不同的独立审查模型")
     context = await _writer_context(engine, project_id, number)
     chapter = await engine.chapters.get_by_number(project_id, number)
     project = await engine.get_project(project_id)
@@ -1403,8 +1398,6 @@ async def continuity_chapter(
     workflow: Annotated[AgentWorkflow, Depends(get_workflow)],
     review_workflow: Annotated[AgentWorkflow | None, Depends(get_review_workflow)],
 ):
-    if review_workflow is None:
-        raise InvalidStateError("请先配置与生成模型不同的独立审查模型")
     context = await _writer_context(engine, project_id, number)
     chapter = await engine.chapters.get_by_number(project_id, number)
     if not chapter.content.strip():

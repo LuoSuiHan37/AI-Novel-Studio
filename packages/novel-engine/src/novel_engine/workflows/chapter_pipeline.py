@@ -42,6 +42,7 @@ from novel_engine.models.enums import (
     MemoryLayer,
     MemoryType,
 )
+from novel_engine.models.story_state import StoryState, apply_state_delta
 from novel_engine.presets.loader import resolve_style_bundle
 from novel_engine.presets.models import StyleBundle
 from novel_engine.prompts.loader import agent_prompts_root
@@ -321,6 +322,24 @@ class ChapterGenerationPipeline:
         if profile_style:
             style = style.model_copy(update={"style_guide": f"{style.style_guide}\n{profile_style}"})
         self._ensure_global(project_id, bible, world, characters, plot)
+        if self.memory.store.story_state(project_id) is None:
+            self.memory.store.set_story_state(
+                StoryState(
+                    project_id=project_id,
+                    entities=[
+                        {
+                            "canonical_name": item.name,
+                            "aliases": list(item.aliases),
+                            "entity_type": "character",
+                            "status": "active",
+                            "current_location": plan.location,
+                            "introduced_chapter": 0,
+                            "source_evidence": "approved character roster",
+                        }
+                        for item in characters
+                    ],
+                )
+            )
         hooks = await self.engine.hooks.list(project_id, open_only=True)
         retrieval = RetrievalPipeline(self.memory.store, self.memory.embedder)
         package = retrieval.retrieve(
@@ -377,6 +396,7 @@ class ChapterGenerationPipeline:
             ),
             language=project.language,
             creative_profile=creative_profile,
+            story_state_ledger=self.memory.store.story_state_ledger(project_id),
             chapter_word_min=style.platform.chapter_word_min,
             chapter_word_max=style.platform.chapter_word_max,
         )
@@ -860,6 +880,20 @@ class ChapterGenerationPipeline:
         memory_result = await self.workflow.memory.run(
             MemoryAgentInput(chapter_number=chapter_number, prose=prose, chapter_plan=plan_agent)
         )
+        state = self.memory.store.story_state(project_id)
+        if state is None:
+            state = StoryState(project_id=project_id)
+        next_state, state_findings = apply_state_delta(
+            state,
+            memory_result.output.state_delta,
+            chapter_number=chapter_number,
+        )
+        hard_state_findings = [
+            item for item in state_findings if item.severity is ContinuityVerdict.ERROR
+        ]
+        if hard_state_findings:
+            details = "; ".join(item.problem for item in hard_state_findings[:3])
+            raise InvalidStateError(f"不能批准：故事状态变更校验失败：{details}")
         hook_result = await self.workflow.hook.run(
             HookAgentInput(chapter_number=chapter_number, chapter_plan=plan_agent, prose=prose)
         )
@@ -1058,6 +1092,7 @@ class ChapterGenerationPipeline:
             confirmed_by=confirmed_by,
             commit=False,
         )
+        self.memory.store.set_story_state(next_state)
         return CommitResult(
             chapter=approved,
             summary=summary,
@@ -1067,8 +1102,10 @@ class ChapterGenerationPipeline:
             timeline=timeline,
             character_states=character_states,
             memory_validation={
-                "overall": "warning" if handoff_findings else "pass",
-                "findings": [item.model_dump(mode="json") for item in handoff_findings],
+                "overall": "warning" if (handoff_findings or state_findings) else "pass",
+                "findings": [
+                    item.model_dump(mode="json") for item in handoff_findings
+                ] + [item.model_dump(mode="json") for item in state_findings],
             },
         )
 

@@ -158,6 +158,7 @@ class InjectionProposal(BaseModel):
     heat_level: str = "medium"
     logline: str
     synopsis: str
+    cover_prompt: str = ""
     tropes: list[str] = Field(default_factory=list)
     plot_structure: str
     plot_summary: str

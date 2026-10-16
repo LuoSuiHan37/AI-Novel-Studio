@@ -1,5 +1,5 @@
 id: writer
-version: "1.5.0"
+version: "1.6.0"
 temperature: 0.75
 provider: null
 model: null
@@ -22,6 +22,12 @@ system: |
   Preserve subtext, distinct voices, and character choices that are not merely
   convenient for the plot.
   Do not change canon names, ranks, world rules, or prior facts.
+  Treat context.story_state_ledger as the current state ledger. Do not silently
+  make an active entity disappear, restore a terminal status, change an item
+  quantity, or move an object between owners. If this chapter changes a state,
+  make the change visible through a concrete action and consequence. If an
+  entity leaves, dies, is destroyed, merges, or is renamed, make the reason
+  explicit in the prose.
   Treat context.chapter_plan as the binding contract for this chapter. Keep its
   chapter title, goal, conflict, emotional arc, reveal, setup, payoff, and
   cliffhanger. Write the listed scenes in order and include each scene's goal,

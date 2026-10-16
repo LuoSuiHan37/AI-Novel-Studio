@@ -12,6 +12,7 @@ from app.db.models.memory import StoryMemory, TimelineEvent
 from novel_engine.memory.models import ChapterMemory, CharacterMemory, MemoryRecord, TimelineMemory, VectorRecord
 from novel_engine.memory.service import MemoryService
 from novel_engine.models.enums import EpistemicStatus, Importance, MemoryLayer, MemoryType
+from novel_engine.models.story_state import StoryState
 from novel_engine.style.anti_repetition import StyleHistory
 from novel_engine.workflows.chapter_pipeline import CommitResult, ChapterGenerationPipeline
 
@@ -69,6 +70,11 @@ async def hydrate_pipeline_memory(
                     current_state=row.content,
                     relationship_changes=list(meta.get("relationship_changes") or []),
                 )
+            )
+            continue
+        if kind == "story_state":
+            memory.store.set_story_state(
+                StoryState.model_validate((row.extra_metadata or {}).get("state") or {})
             )
             continue
         record = MemoryRecord(
@@ -210,6 +216,31 @@ async def persist_commit(
                 unknown_to=list(item.unknown_to),
             )
         )
+    state = pipeline.memory.store.story_state(project_id)
+    if state is not None:
+        state_row = await session.scalar(
+            select(StoryMemory).where(
+                StoryMemory.project_id == project_id,
+                StoryMemory.dedupe_key == _dedupe_key("story_state", project_id),
+            )
+        )
+        values = {
+            "memory_type": MemoryType.FACT.value,
+            "layer": MemoryLayer.GLOBAL.value,
+            "epistemic_status": EpistemicStatus.CONFIRMED_FACT.value,
+            "importance": Importance.HIGH.value,
+            "source_chapter_id": chapter_id,
+            "chapter_number": result.chapter.chapter_number,
+            "content": f"Story state after chapter {result.chapter.chapter_number}",
+            "tags": ["story_state"],
+            "extra_metadata": {"kind": "story_state", "state": state.model_dump(mode="json")},
+        }
+        if state_row is None:
+            session.add(StoryMemory(project_id=project_id, dedupe_key=_dedupe_key("story_state", project_id), **values))
+        else:
+            for key, value in values.items():
+                setattr(state_row, key, value)
+            flag_modified(state_row, "extra_metadata")
     for handoff in getattr(summary, "scene_handoffs", []):
         facts: dict[str, dict[str, list[str]]] = {}
         for character, items in (handoff.who_knows or {}).items():
