@@ -46,7 +46,7 @@ from novel_engine.domain.errors import InvalidStateError
 from novel_engine.memory.service import MemoryService
 from novel_engine.models.entities import ChapterPlan, Hook, ScenePlan
 from novel_engine.creative.contract import contract_for_project
-from novel_engine.models.enums import ApprovalStatus, ChapterStatus, ContinuitySeverity, ContinuityVerdict
+from novel_engine.models.enums import ApprovalStatus, ChapterStatus, ContinuitySeverity, ContinuityVerdict, ProjectStatus
 from novel_engine.models.enums import EpistemicStatus, Importance, MemoryLayer, MemoryType
 from novel_engine.presets.loader import resolve_style_bundle
 from novel_engine.providers.base import LLMProvider
@@ -70,6 +70,14 @@ from novel_engine.agents.contracts import ChapterPlannerInput, ContinuityInput, 
 from novel_engine.workflows.context import character_to_agent, plot_to_outline, story_bible_to_architect
 
 router = APIRouter(tags=["chapters"])
+
+
+async def _sync_project_writing_status(engine: NovelEngine, project_id: UUID) -> None:
+    """Keep the project status aligned once it contains actual prose."""
+    project = await engine.get_project(project_id)
+    if project.status in {ProjectStatus.COMPLETED, ProjectStatus.ARCHIVED, ProjectStatus.WRITING, ProjectStatus.REVISING}:
+        return
+    await engine.update_project(project.model_copy(update={"status": ProjectStatus.WRITING}))
 
 
 def _content_fingerprint(content: str) -> str:
@@ -848,6 +856,8 @@ async def generate_chapter(
             await engine.update_project(project.model_copy(update={
                 "extra_metadata": {**(project.extra_metadata or {}), "quality_reviews": quality_reviews[-50:]}
             }))
+        if chapter_row.content.strip():
+            await _sync_project_writing_status(engine, project_id)
         await save_project_snapshot(engine, project_id)
     auto_approved = False
     if (
@@ -876,6 +886,8 @@ async def generate_chapter(
                 await session.rollback()
                 raise
         chapter_row = await engine.chapters.get_by_number(project_id, number)
+        if chapter_row.content.strip():
+            await _sync_project_writing_status(engine, project_id)
         await save_project_snapshot(engine, project_id)
         auto_approved = chapter_row.status is ChapterStatus.APPROVED
     else:
@@ -1072,6 +1084,8 @@ async def patch_chapter(
             "content_fingerprint": _content_fingerprint(chapter.content),
         }
         chapter = await engine.chapters.update(chapter.model_copy(update={"extra_metadata": metadata}))
+        if chapter.content.strip():
+            await _sync_project_writing_status(engine, project_id)
         await save_project_snapshot(engine, project_id)
     elif body.audit is not None:
         chapter = await engine.chapters.update(

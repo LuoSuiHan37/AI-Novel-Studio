@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { genreLabel, platformLabel, projectStatusLabel } from "@/lib/labels";
 import type { Chapter, Project, StoryBible } from "@/lib/types";
 
-type Filter = "all" | "writing" | "planning" | "completed";
+type Filter = "all" | "writing" | "completed";
+type ProjectCategory = Filter | "planning";
 type PlatformFilter = "all" | "fanqie" | "qidian" | "qimao" | "zongheng" | "shuqi" | "other";
 type ProjectSummary = { project: Project; chapters: Chapter[]; story: StoryBible | null };
 const PLATFORM_FILTERS: Array<[PlatformFilter, string]> = [["all", "全部平台"], ["fanqie", "番茄"], ["qidian", "起点"], ["qimao", "七猫"], ["zongheng", "纵横"], ["shuqi", "书旗"], ["other", "其他平台"]];
@@ -32,6 +33,19 @@ function displayTitle(project: Project): string {
   return title;
 }
 
+function isTestProject(project: Project): boolean {
+  return /^Rollback [0-9a-f]{8}$/i.test(project.title?.trim() || "");
+}
+
+function hasWrittenContent(item: ProjectSummary): boolean {
+  return item.chapters.some((chapter) => Boolean(chapter.content?.trim()));
+}
+
+function effectiveStatus(item: ProjectSummary): string {
+  if (item.project.status === "completed" || item.project.status === "archived") return item.project.status;
+  return hasWrittenContent(item) ? "writing" : item.project.status;
+}
+
 function formatDate(value?: string): string {
   if (!value) return "更新时间未知";
   const date = new Date(value);
@@ -39,9 +53,11 @@ function formatDate(value?: string): string {
   return new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(date);
 }
 
-function classify(project: Project): Exclude<Filter, "all"> {
-  if (project.status === "completed") return "completed";
+function classify(item: ProjectSummary): ProjectCategory {
+  const { project } = item;
+  if (effectiveStatus(item) === "completed") return "completed";
   if (project.status === "writing" || project.status === "revising" || ["drafting", "review", "publish"].includes(project.current_stage)) return "writing";
+  if (hasWrittenContent(item)) return "writing";
   return "planning";
 }
 
@@ -100,7 +116,7 @@ function ProjectCard({ item, list, onDelete, onEditPlatform }: { item: ProjectSu
   const wordCount = chapters.reduce((total, current) => total + (current.word_count || 0), 0);
   return <article className={list ? "flex min-w-0 gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-[var(--shadow-card)]" : "flex min-w-0 gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-[var(--shadow-card)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[var(--shadow-float)]"}>
     <Link href={`/projects/${project.id}`} className={list ? "h-32 w-24 shrink-0" : "h-36 w-24 shrink-0"} aria-label={`打开${displayTitle(project)}`}><Cover project={project} small /></Link>
-    <div className="flex min-w-0 flex-1 flex-col"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-serif text-xl font-semibold text-slate-950">{displayTitle(project)}</p><p className="mt-1 text-xs text-slate-500">{genreLabel(project.genre)} · {projectStatusLabel(project.status)}</p><span className="mt-2 inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">{platformLabel(project.target_platform) || "未设置平台"}</span></div><details className="relative"><summary className="flex size-9 cursor-pointer list-none items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-800 [&::-webkit-details-marker]:hidden" aria-label={`更多${displayTitle(project)}操作`}><MoreHorizontal aria-hidden="true" className="size-5" /></summary><div className="absolute right-0 top-10 z-20 w-40 rounded-xl border border-slate-200 bg-white p-1.5 text-sm shadow-[var(--shadow-float)]"><Link className="block rounded-lg px-3 py-2 hover:bg-slate-50" href={`/projects/${project.id}`}>进入作品</Link><Link className="block rounded-lg px-3 py-2 hover:bg-slate-50" href={`/projects/${project.id}/bible`}>书级创作内核</Link><Link className="block rounded-lg px-3 py-2 hover:bg-slate-50" href={`/projects/${project.id}/research`}>参考研究</Link><button type="button" onClick={() => onEditPlatform(project)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-50"><Check aria-hidden="true" className="size-4" />设置平台</button><button type="button" onClick={() => onDelete(project)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-red-600 hover:bg-red-50"><Trash2 aria-hidden="true" className="size-4" />删除作品</button></div></details></div><p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{summaryText(item)}</p><div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-1 pt-4 text-sm text-slate-500"><span>{chapters.length} 章</span><span>{wordCount.toLocaleString("zh-CN")} 字</span><span>{formatDate(project.updated_at)}</span></div></div>
+    <div className="flex min-w-0 flex-1 flex-col"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-serif text-xl font-semibold text-slate-950">{displayTitle(project)}</p><p className="mt-1 text-xs text-slate-500">{genreLabel(project.genre)} · {projectStatusLabel(effectiveStatus(item))}</p><span className="mt-2 inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">{platformLabel(project.target_platform) || "未设置平台"}</span></div><details className="relative"><summary className="flex size-9 cursor-pointer list-none items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-800 [&::-webkit-details-marker]:hidden" aria-label={`更多${displayTitle(project)}操作`}><MoreHorizontal aria-hidden="true" className="size-5" /></summary><div className="absolute right-0 top-10 z-20 w-40 rounded-xl border border-slate-200 bg-white p-1.5 text-sm shadow-[var(--shadow-float)]"><Link className="block rounded-lg px-3 py-2 hover:bg-slate-50" href={`/projects/${project.id}`}>进入作品</Link><Link className="block rounded-lg px-3 py-2 hover:bg-slate-50" href={`/projects/${project.id}/bible`}>书级创作内核</Link><Link className="block rounded-lg px-3 py-2 hover:bg-slate-50" href={`/projects/${project.id}/research`}>参考研究</Link><button type="button" onClick={() => onEditPlatform(project)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-slate-50"><Check aria-hidden="true" className="size-4" />设置平台</button><button type="button" onClick={() => onDelete(project)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-red-600 hover:bg-red-50"><Trash2 aria-hidden="true" className="size-4" />删除作品</button></div></details></div><p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{summaryText(item)}</p><div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-1 pt-4 text-sm text-slate-500"><span>{chapters.length} 章</span><span>{wordCount.toLocaleString("zh-CN")} 字</span><span>{formatDate(project.updated_at)}</span></div></div>
   </article>;
 }
 
@@ -121,7 +137,7 @@ export default function DashboardPage() {
   useEffect(() => {
     let active = true;
     Promise.resolve().then(async () => {
-      const projects = (await api<Project[]>("/projects")).filter((project) => project.extra_metadata?.creation_status !== "draft");
+      const projects = (await api<Project[]>("/projects")).filter((project) => project.extra_metadata?.creation_status !== "draft" && !isTestProject(project));
       const summaries = await Promise.all(projects.map(async (project) => {
         const [chapters, story] = await Promise.all([
           api<Chapter[]>(`/projects/${project.id}/chapters`).catch(() => []),
@@ -136,7 +152,7 @@ export default function DashboardPage() {
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return [...items].filter(({ project }) => filter === "all" || classify(project) === filter).filter(({ project }) => platformFilter === "all" || (platformFilter === "other" ? !["fanqie", "qidian", "qimao", "zongheng", "shuqi"].includes(project.target_platform || "") : project.target_platform === platformFilter)).filter(({ project, story }) => !needle || [displayTitle(project), project.genre, project.target_platform, story?.synopsis, story?.logline, project.logline].some((value) => value?.toLowerCase().includes(needle))).sort((a, b) => new Date(b.project.updated_at || b.project.created_at || 0).getTime() - new Date(a.project.updated_at || a.project.created_at || 0).getTime());
+    return [...items].filter((item) => filter === "all" || classify(item) === filter).filter(({ project }) => platformFilter === "all" || (platformFilter === "other" ? !["fanqie", "qidian", "qimao", "zongheng", "shuqi"].includes(project.target_platform || "") : project.target_platform === platformFilter)).filter(({ project, story }) => !needle || [displayTitle(project), project.genre, project.target_platform, story?.synopsis, story?.logline, project.logline].some((value) => value?.toLowerCase().includes(needle))).sort((a, b) => new Date(b.project.updated_at || b.project.created_at || 0).getTime() - new Date(a.project.updated_at || a.project.created_at || 0).getTime());
   }, [filter, items, platformFilter, query]);
 
   async function deleteProject() {
@@ -156,7 +172,7 @@ export default function DashboardPage() {
   }
 
   const continued = items.length ? [...items].sort((a, b) => new Date(b.project.updated_at || b.project.created_at || 0).getTime() - new Date(a.project.updated_at || a.project.created_at || 0).getTime()).find((item) => item.chapters.length > 0) : null;
-  const filterOptions: Array<[Filter, string]> = [["all", "全部"], ["writing", "写作中"], ["planning", "策划中"], ["completed", "已完成"]];
+  const filterOptions: Array<[Filter, string]> = [["all", "全部"], ["writing", "写作中"], ["completed", "已完成"]];
 
   return <section className="mx-auto w-full max-w-[1440px] space-y-8">
     <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between"><div><p className="mb-2 text-xs font-semibold tracking-[0.18em] text-primary">AI + HUMAN CREATIVE SYSTEM</p><h1 className="font-serif text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">创作工作台</h1><p className="mt-3 text-base text-slate-500">让每一个故事，向前一步</p></div><div className="flex flex-col gap-3 sm:flex-row sm:items-center"><label className="relative block"><span className="sr-only">搜索作品、角色、设置或灵感</span><Search aria-hidden="true" className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索作品、角色、设置、灵感…" className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-4 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-primary/15 sm:w-72" /></label><Link href="/settings" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-white px-4 text-sm font-semibold text-primary shadow-sm transition hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><Settings2 aria-hidden="true" className="size-4" />AI 设置</Link><Link href="/projects?create=1" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-primary px-5 text-sm font-semibold text-white shadow-[0_8px_18px_rgba(37,99,235,0.2)] transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"><Plus aria-hidden="true" className="size-5" />新建小说</Link></div></header>

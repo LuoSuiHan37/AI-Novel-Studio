@@ -275,29 +275,34 @@ def test_finalize_creation_rolls_back_real_postgresql_commit_failure(monkeypatch
                 RuntimeError("connection dropped during commit"),
             )
 
-        monkeypatch.setattr(research_routes, "_apply_framework_proposal", write_before_commit_failure)
-        monkeypatch.setattr(SqlAlchemyUnitOfWork, "commit", fail_commit)
-        response = client.post(
-            f"/projects/{project_id}/finalize-creation",
-            json={
-                "title": "Final title",
-                "genre": "mystery",
-                "language": "en",
-                "target_platform": "alphanovel",
-                "chapter_count_target": 120,
-                "target_reader": "female",
-                "pitch": pitch,
-                "research_binding": binding,
-                "framework_proposal": {},
-                "framework_confirmed": True,
-                "confirmed_by": "test-user",
-            },
-        )
-        assert response.status_code == 500
+        try:
+            monkeypatch.setattr(research_routes, "_apply_framework_proposal", write_before_commit_failure)
+            monkeypatch.setattr(SqlAlchemyUnitOfWork, "commit", fail_commit)
+            response = client.post(
+                f"/projects/{project_id}/finalize-creation",
+                json={
+                    "title": "Final title",
+                    "genre": "mystery",
+                    "language": "en",
+                    "target_platform": "alphanovel",
+                    "chapter_count_target": 120,
+                    "target_reader": "female",
+                    "pitch": pitch,
+                    "research_binding": binding,
+                    "framework_proposal": {},
+                    "framework_confirmed": True,
+                    "confirmed_by": "test-user",
+                },
+            )
+            assert response.status_code == 500
 
-        project = client.get(f"/projects/{project_id}")
-        assert project.status_code == 200
-        assert project.json()["status"] == "draft"
-        assert client.get(f"/projects/{project_id}/story").status_code == 404
-
-        client.delete(f"/projects/{project_id}")
+            project = client.get(f"/projects/{project_id}")
+            assert project.status_code == 200
+            assert project.json()["status"] == "draft"
+            assert client.get(f"/projects/{project_id}/story").status_code == 404
+        finally:
+            # The commit failure is deliberately global to this test. Restore it
+            # before deleting the setup project, otherwise cleanup also fails.
+            monkeypatch.undo()
+            cleanup = client.delete(f"/projects/{project_id}")
+            assert cleanup.status_code == 204
