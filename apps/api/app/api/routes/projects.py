@@ -97,6 +97,7 @@ async def suggest_project_title(
     title_options = rank_creative_candidates(
         [result.output.working_title, *result.output.title_candidates],
         existing=existing_titles,
+        genre=body.genre,
     )
     title = (title_options[0]["text"] if title_options else result.output.working_title.strip())
     duplicate = any(item.casefold() == title.casefold() for item in existing_titles)
@@ -166,6 +167,7 @@ async def suggest_existing_project_title(
     title_options = rank_creative_candidates(
         [result.output.working_title, *result.output.title_candidates],
         existing=[project.title, *existing_titles],
+        genre=project.genre,
     )
     title = title_options[0]["text"] if title_options else result.output.working_title.strip()
     available = not any(item.casefold() == title.casefold() for item in [project.title, *existing_titles])

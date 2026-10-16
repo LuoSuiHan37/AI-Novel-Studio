@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.chapter import ChapterSummary
 from app.db.models.memory import StoryMemory, TimelineEvent
-from novel_engine.memory.models import ChapterMemory, CharacterMemory, MemoryRecord, TimelineMemory, VectorRecord
+from novel_engine.memory.models import ChapterHandoff, ChapterMemory, CharacterMemory, MemoryRecord, TimelineMemory, VectorRecord
 from novel_engine.memory.service import MemoryService
 from novel_engine.models.enums import EpistemicStatus, Importance, MemoryLayer, MemoryType
 from novel_engine.models.story_state import StoryState
@@ -56,6 +56,8 @@ async def hydrate_pipeline_memory(
                     characters=list(meta.get("characters") or []),
                     arc=meta.get("arc"),
                     scene_handoffs=list(meta.get("scene_handoffs") or []),
+                    chapter_handoff=ChapterHandoff.model_validate(meta["chapter_handoff"])
+                    if isinstance(meta.get("chapter_handoff"), dict) else None,
                 )
             )
             continue
@@ -172,6 +174,7 @@ async def persist_commit(
                 "arc": result.chapter.story_arc_id and str(result.chapter.story_arc_id),
                 "scene_handoffs": [item.model_dump() for item in getattr(summary, "scene_handoffs", [])],
                 "memory_validation": result.memory_validation,
+                "chapter_handoff": result.handoff.model_dump(mode="json") if result.handoff else None,
             },
         )
     )

@@ -11,7 +11,9 @@ from app.api.deps import get_engine, get_optional_llm_provider
 from app.api.schemas import ConfirmBody, CreationPitch, ProjectFinalizeCreation, ResearchSessionOut, ResearchSourceCreate, ResearchSourceUpload, ResearchStageUpdate
 from app.core.config import Settings, get_settings
 from app.services.book_snapshot import save_project_snapshot
+from app.services.work_tags import validate_work_tags
 from novel_engine.domain.errors import InvalidStateError
+from novel_engine.creative.contract import compile_creative_contract
 from novel_engine.services.engine import NovelEngine
 from novel_engine.models.entities import Character, ChapterPlan, MasterPlot, PlotBeat, ScenePlan, StoryArc, StoryBible, WorldBible, WorldRule
 from novel_engine.models.enums import CharacterRole, IntensityLevel, NarrativeTense, PointOfView, ProjectStatus
@@ -553,6 +555,11 @@ async def create_framework_proposal(
 ) -> dict:
     """Create a reviewable framework proposal from the confirmed creation pitch."""
     project = await engine.get_project(project_id)
+    if body.work_tags:
+        try:
+            validate_work_tags(body.work_tags, allow_empty=False)
+        except ValueError as exc:
+            raise InvalidStateError(str(exc)) from exc
     research = _session(project)
     stages = research.get("stages") or []
     if research.get("status") != "completed" or not stages or not all(item.get("status") == "done" for item in stages):
@@ -576,6 +583,15 @@ async def create_framework_proposal(
             "target_platform": project.target_platform,
             "language": project.language,
             "creation_proposal": body.model_dump(mode="json"),
+            "creative_contract": compile_creative_contract(
+                genre=project.genre,
+                audience="女频" if project.language == "zh-CN" else "",
+                core_promise=body.logline or body.synopsis,
+                premise=body.premise,
+                theme=body.theme,
+                work_tags=body.work_tags,
+                language=project.language,
+            ),
         },
     )
     artifact = {
@@ -586,6 +602,15 @@ async def create_framework_proposal(
             "proposal": proposal,
             "creation_proposal": body.model_dump(mode="json"),
             "research_binding": body.research_binding.model_dump(mode="json"),
+            "creative_contract": compile_creative_contract(
+                genre=project.genre,
+                audience="女频" if project.language == "zh-CN" else "",
+                core_promise=body.logline or body.synopsis,
+                premise=body.premise,
+                theme=body.theme,
+                work_tags=body.work_tags,
+                language=project.language,
+            ),
             "status": "pending_confirmation",
         },
     }
@@ -617,6 +642,11 @@ async def finalize_creation(
         raise ApprovalRequiredError("confirmed_by is required")
     if body.research_binding != body.pitch.research_binding:
         raise InvalidStateError("书名简介与最终创建使用的研究绑定不一致")
+    if body.pitch.work_tags:
+        try:
+            validate_work_tags(body.pitch.work_tags, allow_empty=False)
+        except ValueError as exc:
+            raise InvalidStateError(str(exc)) from exc
     if not body.framework_confirmed:
         raise InvalidStateError("请先确认小说框架提案")
 
@@ -642,7 +672,14 @@ async def finalize_creation(
         raise InvalidStateError("小说框架提案不存在或已失效")
     if framework_content.get("research_binding") != body.research_binding.model_dump(mode="json"):
         raise InvalidStateError("小说框架提案与当前研究绑定不一致")
-    if framework_content.get("creation_proposal") != body.pitch.model_dump(mode="json"):
+    stored_creation_proposal = dict(framework_content.get("creation_proposal") or {})
+    submitted_creation_proposal = body.pitch.model_dump(mode="json")
+    # Keep old drafts valid: work_tags was added after earlier framework
+    # artifacts had already been persisted.
+    if not stored_creation_proposal.get("work_tags") and not submitted_creation_proposal.get("work_tags"):
+        stored_creation_proposal.pop("work_tags", None)
+        submitted_creation_proposal.pop("work_tags", None)
+    if stored_creation_proposal != submitted_creation_proposal:
         raise InvalidStateError("创作提案已修改，请重新生成小说框架")
     if framework_content.get("proposal") != body.framework_proposal:
         raise InvalidStateError("提交的小说框架不是当前提案版本")
@@ -672,6 +709,15 @@ async def finalize_creation(
                 commit=False,
             )
         binding_metadata = body.research_binding.model_dump(mode="json")
+        creative_contract = compile_creative_contract(
+            genre=body.genre,
+            audience=body.target_reader,
+            core_promise=body.pitch.logline or body.pitch.synopsis,
+            premise=body.pitch.premise,
+            theme=body.pitch.theme,
+            work_tags=body.pitch.work_tags,
+            language=body.language,
+        )
         updated_project = await engine.update_project(
             project.model_copy(update={
                 "title": body.title.strip(),
@@ -684,6 +730,8 @@ async def finalize_creation(
                     **(project.extra_metadata or {}),
                     "creation_status": "created",
                     "research_binding": binding_metadata,
+                    "creative_contract": creative_contract,
+                    "work_tags": body.pitch.work_tags,
                 },
             }),
             commit=False,
@@ -704,7 +752,7 @@ async def finalize_creation(
             tropes=[body.genre],
             logline=body.pitch.logline,
             synopsis=body.pitch.synopsis,
-            extra_metadata={"research_binding": binding_metadata, "target_reader": body.target_reader, "reading_tags": body.pitch.reading_tags, "content_tags": body.pitch.content_tags, "protagonist_names": body.pitch.protagonist_names},
+            extra_metadata={"research_binding": binding_metadata, "target_reader": body.target_reader, "reading_tags": body.pitch.reading_tags, "content_tags": body.pitch.content_tags, "protagonist_names": body.pitch.protagonist_names, "work_tags": body.pitch.work_tags},
         ), commit=False)
         await engine.uow.commit()
     except Exception:

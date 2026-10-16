@@ -90,6 +90,7 @@ export type StoryBible = {
       reading_tags?: string[];
       content_tags?: string[];
       protagonist_names?: string[];
+      work_tags?: Record<string, string[]>;
     };
   };
 };

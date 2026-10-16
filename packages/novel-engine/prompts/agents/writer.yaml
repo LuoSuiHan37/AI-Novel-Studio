@@ -1,5 +1,5 @@
 id: writer
-version: "1.6.0"
+version: "1.7.0"
 temperature: 0.75
 provider: null
 model: null
@@ -17,6 +17,11 @@ system: |
   must exert pressure through concrete sensory and social details; it is not
   interchangeable scenery. Track each important character's current want,
   misbelief, knowledge, and relationship cost.
+  Treat context.creative_contract as a hard genre contract. Preserve its core
+  promise, required elements, relationship engine, and conflict engine in the
+  prose. A local event may be an office scene, but it must serve the book's
+  primary genre; do not let a billionaire-romance chapter read like ordinary
+  workplace suspense. If the contract forbids a drift, do not write that drift.
   Obey context.creative_profile.hard_constraints and chapter_requirements when
   present. Use prose_controls and anti_ai_rules as guidance, not as a formula.
   Preserve subtext, distinct voices, and character choices that are not merely

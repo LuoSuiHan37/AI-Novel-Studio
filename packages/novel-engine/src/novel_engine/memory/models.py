@@ -38,6 +38,31 @@ class VectorRecord(MemoryRecord):
     layer: MemoryLayer = MemoryLayer.VECTOR
 
 
+class HandoffEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    chapter_number: int
+    scene_number: int | None = None
+    fact: str
+    source_excerpt: str = ""
+
+
+class ChapterHandoff(BaseModel):
+    """Small, evidence-linked contract for the immediately following chapter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chapter_number: int
+    immediate_consequences: list[str] = Field(default_factory=list)
+    character_changes: list[str] = Field(default_factory=list)
+    confirmed_facts: list[str] = Field(default_factory=list)
+    unresolved_questions: list[str] = Field(default_factory=list)
+    open_hooks: list[str] = Field(default_factory=list)
+    required_inheritance: list[str] = Field(default_factory=list)
+    forbidden_reveals: list[str] = Field(default_factory=list)
+    evidence: list[HandoffEvidence] = Field(default_factory=list)
+
+
 class ChapterMemory(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -56,6 +81,7 @@ class ChapterMemory(BaseModel):
     characters: list[str] = Field(default_factory=list)
     arc: str | None = None
     scene_handoffs: list[dict] = Field(default_factory=list)
+    chapter_handoff: ChapterHandoff | None = None
 
 
 class TimelineMemory(BaseModel):
@@ -156,6 +182,19 @@ class ContextPackage(BaseModel):
         parts = [self.world, self.master_plot, *self.core_rules, *self.unresolved_hooks, *self.foreshadowing]
         parts.extend(item.content for item in self.semantic_hits)
         for chapter in self.recent_chapters:
+            if chapter.chapter_handoff is not None:
+                handoff = chapter.chapter_handoff
+                parts.extend([
+                    f"上一章交接（第{handoff.chapter_number}章）",
+                    *handoff.immediate_consequences,
+                    *handoff.character_changes,
+                    *handoff.confirmed_facts,
+                    *handoff.unresolved_questions,
+                    *handoff.required_inheritance,
+                    *handoff.forbidden_reveals,
+                ])
+                for item in handoff.evidence:
+                    parts.extend([item.fact, item.source_excerpt])
             parts.extend(
                 [
                     chapter.title,

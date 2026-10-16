@@ -19,6 +19,7 @@ def rank_creative_candidates(
     candidates: Iterable[str],
     *,
     existing: Iterable[str] = (),
+    genre: str | None = None,
     limit: int = 10,
 ) -> list[dict]:
     """Rank reader-facing candidates with transparent, conservative heuristics.
@@ -53,6 +54,16 @@ def rank_creative_candidates(
             reasons.append("包含冲突或悬念词")
         if any(char in value for char in "：:，,？！?!"):
             score += 4
+        if genre == "billionaire_romance":
+            if any(marker in value for marker in ("豪门", "总裁", "继承人", "契约", "婚约", "夫人", "身份", "股权", "董事会")):
+                score += 18
+                reasons.append("符合豪门总裁类型信号")
+            else:
+                score -= 22
+                reasons.append("缺少豪门总裁类型信号")
+            if any(marker in value for marker in ("工位", "加班", "办公室", "会议室", "电话")):
+                score -= 18
+                reasons.append("容易被误读为普通职场故事")
         score = max(0, min(100, score))
         ranked.append({"text": value, "score": score, "reasons": reasons})
     ranked.sort(key=lambda item: (-item["score"], item["text"]))

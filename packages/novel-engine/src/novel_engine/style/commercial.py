@@ -27,6 +27,7 @@ def scan_commercial_quality(*, prose: str, context: WriterContext) -> list[Conti
     findings: list[ContinuityFinding] = []
     words = count_text_units(prose)
     profile = context.creative_profile if isinstance(context.creative_profile, dict) else {}
+    contract = context.creative_contract if isinstance(context.creative_contract, dict) else {}
 
     if not prose.strip():
         findings.append(_finding(
@@ -95,6 +96,8 @@ def scan_commercial_quality(*, prose: str, context: WriterContext) -> list[Conti
             "Vary syntax and paragraph rhythm where it serves the character's voice.",
         ))
 
+    findings.extend(_genre_alignment_findings(prose, contract))
+
     hook = plan.cliffhanger.strip().casefold()
     recent = [item.content.casefold() for item in context.memories]
     if len(hook) >= 18 and any(hook in item for item in recent):
@@ -106,6 +109,25 @@ def scan_commercial_quality(*, prose: str, context: WriterContext) -> list[Conti
             "Change the hook type or add a materially different escalation.",
         ))
     return findings
+
+
+def _genre_alignment_findings(prose: str, contract: dict) -> list[ContinuityFinding]:
+    if contract.get("primary_genre") != "billionaire_romance":
+        return []
+    lowered = prose.casefold()
+    title_signals = [str(item).casefold() for item in contract.get("title_signals", []) if str(item).strip()]
+    drift_markers = ("工位", "加班", "办公室", "会议室", "同事", "打卡")
+    signal_hits = [item for item in title_signals if item in lowered]
+    drift_hits = [item for item in drift_markers if item in prose]
+    if drift_hits and not signal_hits:
+        return [_finding(
+            ContinuityVerdict.ERROR,
+            "genre_alignment",
+            "正文出现职场场景，但没有兑现豪门总裁类型信号。",
+            f"职场词：{', '.join(drift_hits)}；类型词：未发现",
+            "让场景直接推动总裁/继承人、豪门权力、身份秘密或核心关系冲突；否则重写本章冲突。",
+        )]
+    return []
 
 
 def _repeated_sentence_openings(prose: str) -> bool:

@@ -96,6 +96,7 @@ class CreationPitch(ApiModel):
     reading_tags: list[str] = Field(default_factory=list)
     content_tags: list[str] = Field(default_factory=list)
     protagonist_names: list[str] = Field(default_factory=list)
+    work_tags: dict[str, list[str]] = Field(default_factory=dict)
     research_binding: ResearchBinding
 
 
@@ -134,6 +135,7 @@ class StoryPatch(BaseModel):
     reading_tags: list[str] = Field(default_factory=list)
     content_tags: list[str] = Field(default_factory=list)
     protagonist_names: list[str] = Field(default_factory=list)
+    work_tags: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class CharacterCreate(ApiModel):

@@ -189,6 +189,7 @@ def build_writer_context(
     chapter_word_min: int = 1500,
     chapter_word_max: int = 2500,
     story_state_ledger: str = "",
+    creative_contract: dict | None = None,
 ) -> WriterContext:
     rules = [rule.description for rule in (world.rules if world else []) if rule.description.strip()]
     if not rules and world is not None and world.summary.strip():
@@ -264,4 +265,5 @@ def build_writer_context(
         if isinstance(creative_profile, dict)
         else [],
         story_state_ledger=story_state_ledger,
+        creative_contract=creative_contract or {},
     )

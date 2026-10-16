@@ -45,6 +45,7 @@ from novel_engine.agents.contracts import (
 from novel_engine.domain.errors import InvalidStateError
 from novel_engine.memory.service import MemoryService
 from novel_engine.models.entities import ChapterPlan, Hook, ScenePlan
+from novel_engine.creative.contract import contract_for_project
 from novel_engine.models.enums import ApprovalStatus, ChapterStatus, ContinuitySeverity, ContinuityVerdict
 from novel_engine.models.enums import EpistemicStatus, Importance, MemoryLayer, MemoryType
 from novel_engine.presets.loader import resolve_style_bundle
@@ -740,6 +741,7 @@ async def suggest_chapter_plan(
         language=project.language,
     )
     creative_profile = (project.extra_metadata or {}).get("creative_profile", {})
+    creative_contract = contract_for_project(project)
     profile_style = creative_profile.get("style_guide", "") if isinstance(creative_profile, dict) else ""
     if profile_style:
         style = style.model_copy(update={"style_guide": f"{style.style_guide}\n{profile_style}"})
@@ -758,6 +760,7 @@ async def suggest_chapter_plan(
             open_hooks=[item.description for item in open_hooks],
             language=project.language,
             creative_profile=creative_profile,
+            creative_contract=creative_contract,
         )
     )
     if not proposal.output.scenes or not proposal.output.characters:
@@ -1572,6 +1575,7 @@ async def _writer_context(engine: NovelEngine, project_id: UUID, number: int):
         open_hooks=[item.description for item in hooks],
         language=project.language,
         creative_profile=(project.extra_metadata or {}).get("creative_profile", {}),
+        creative_contract=contract_for_project(project),
     )
 
 

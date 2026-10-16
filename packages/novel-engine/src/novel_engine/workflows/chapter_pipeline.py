@@ -22,6 +22,7 @@ from novel_engine.agents.contracts import (
 )
 from novel_engine.domain.errors import InvalidStateError
 from novel_engine.memory.models import (
+    ChapterHandoff,
     ChapterMemory,
     CharacterMemory,
     ContextPackage,
@@ -30,6 +31,7 @@ from novel_engine.memory.models import (
     TimelineMemory,
 )
 from novel_engine.memory.retrieval import RetrievalPipeline
+from novel_engine.memory.handoff import build_chapter_handoff
 from novel_engine.memory.service import MemoryService
 from novel_engine.models.entities import Chapter, ChapterPlan, ChapterRevision, Foreshadowing, Hook, ScenePlan
 from novel_engine.models.enums import (
@@ -43,6 +45,7 @@ from novel_engine.models.enums import (
     MemoryType,
 )
 from novel_engine.models.story_state import StoryState, apply_state_delta
+from novel_engine.creative.contract import contract_for_project
 from novel_engine.presets.loader import resolve_style_bundle
 from novel_engine.presets.models import StyleBundle
 from novel_engine.prompts.loader import agent_prompts_root
@@ -138,6 +141,7 @@ class CommitResult(BaseModel):
     character_states: list[CharacterMemory]
     advances_next_chapter: bool = False
     memory_validation: dict = Field(default_factory=dict)
+    handoff: ChapterHandoff | None = None
 
 
 def _revise_instruction() -> str:
@@ -313,6 +317,7 @@ class ChapterGenerationPipeline:
                 + ", ".join(missing_character_names)
             )
         creative_profile = (project.extra_metadata or {}).get("creative_profile", {})
+        creative_contract = contract_for_project(project)
         style = resolve_style_bundle(
             platform_id=project.target_platform,
             novel_id=project.genre,
@@ -397,6 +402,7 @@ class ChapterGenerationPipeline:
             language=project.language,
             creative_profile=creative_profile,
             story_state_ledger=self.memory.store.story_state_ledger(project_id),
+            creative_contract=creative_contract,
             chapter_word_min=style.platform.chapter_word_min,
             chapter_word_max=style.platform.chapter_word_max,
         )
@@ -473,6 +479,7 @@ class ChapterGenerationPipeline:
                     style_guide=loaded.style.style_guide,
                     current_arc=loaded.arc.summary if loaded.arc else "",
                     language=loaded.writer_context.language,
+                    creative_contract=loaded.writer_context.creative_contract,
                 )
             )
         if not scenes:
@@ -918,6 +925,10 @@ class ChapterGenerationPipeline:
         if hard_handoff_errors:
             details = "; ".join(item.problem for item in hard_handoff_errors[:3])
             raise InvalidStateError(f"不能批准：场景交接记忆校验失败：{details}")
+        chapter_handoff = build_chapter_handoff(
+            chapter_number=chapter_number,
+            summary=summary,
+        )
         chapter_memory = ChapterMemory(
             project_id=project_id,
             chapter_number=chapter_number,
@@ -933,6 +944,7 @@ class ChapterGenerationPipeline:
             characters=list(loaded.plan.characters),
             arc=loaded.arc.summary if loaded.arc else None,
             scene_handoffs=[item.model_dump() for item in summary.scene_handoffs],
+            chapter_handoff=chapter_handoff,
         )
         self.memory.add_chapter(chapter_memory, confirmed_by=confirmed_by)
 
@@ -1107,6 +1119,7 @@ class ChapterGenerationPipeline:
                     item.model_dump(mode="json") for item in handoff_findings
                 ] + [item.model_dump(mode="json") for item in state_findings],
             },
+            handoff=chapter_handoff,
         )
 
     def _ensure_global(self, project_id, bible, world, characters, plot) -> None:
@@ -1127,8 +1140,23 @@ def _previous_chapter_context(previous_chapter, previous_memory: ChapterMemory |
     if previous_chapter is None or not previous_chapter.content.strip():
         return ""
     handoff_text = ""
+    if previous_memory and previous_memory.chapter_handoff is not None:
+        handoff = previous_memory.chapter_handoff
+        handoff_text = (
+            "\nChapter handoff (evidence-linked):\n"
+            + "\n".join(
+                [
+                    *[f"- immediate consequence: {item}" for item in handoff.immediate_consequences],
+                    *[f"- character change: {item}" for item in handoff.character_changes],
+                    *[f"- confirmed event: {item}" for item in handoff.confirmed_facts],
+                    *[f"- unresolved question: {item}" for item in handoff.unresolved_questions],
+                    *[f"- required inheritance: {item}" for item in handoff.required_inheritance],
+                    *[f"- forbidden reveal: {item}" for item in handoff.forbidden_reveals],
+                ]
+            )
+        )
     if previous_memory and previous_memory.scene_handoffs:
-        handoff_text = "\nScene handoffs:\n" + "\n".join(
+        handoff_text += "\nScene handoffs:\n" + "\n".join(
             "- Scene {scene}: {event}; changes: {changes}; open questions: {questions}; next: {next_steps}".format(
                 scene=item.get("scene_number", "?"),
                 event=item.get("what_happened", ""),

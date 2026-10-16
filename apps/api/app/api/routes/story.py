@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.api.deps import Actor, confirmed_by, get_actor, get_engine
 from app.api.schemas import ConfirmBody, StoryPatch
 from app.services.book_snapshot import save_project_snapshot
+from app.services.work_tags import validate_work_tags
 from novel_engine.domain.errors import NotFoundError
 from novel_engine.models.entities import StoryBible
 from novel_engine.services.engine import NovelEngine
@@ -33,6 +34,13 @@ async def patch_story(
     engine: Annotated[NovelEngine, Depends(get_engine)],
 ) -> StoryBible:
     values = body.model_dump()
+    work_tags = values.get("work_tags", {})
+    if "work_tags" in body.model_fields_set:
+        try:
+            work_tags = validate_work_tags(work_tags, allow_empty=False)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    values["work_tags"] = work_tags
     if any(
         key in body.model_fields_set
         for key in ("target_reader", "reading_tags", "content_tags", "protagonist_names")
@@ -47,6 +55,7 @@ async def patch_story(
         "reading_tags": values.pop("reading_tags", []),
         "content_tags": values.pop("content_tags", []),
         "protagonist_names": values.pop("protagonist_names", []),
+        "work_tags": values.pop("work_tags", work_tags),
     }
     existing = await engine.story_bibles.get(project_id)
     metadata = dict(existing.extra_metadata or {}) if existing else {}
