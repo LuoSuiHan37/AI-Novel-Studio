@@ -5,16 +5,20 @@ from collections import defaultdict
 
 from pydantic import BaseModel, ConfigDict, Field
 
-_WORD = re.compile(r"[a-z']+")
+from novel_engine.style.narrative_fingerprint import NarrativeHistory
+
+_TOKEN = re.compile(r"[a-z']+|[\u3400-\u9fff]")
 _QUOTED = re.compile(r'"([^"]{8,80})"')
 
 
 def _norm(text: str) -> str:
-    return " ".join(_WORD.findall(text.lower()))
+    """Normalize both Latin words and CJK characters for stable matching."""
+
+    return " ".join(_TOKEN.findall(text.casefold()))
 
 
 def _ngrams(text: str, size: int = 4) -> list[str]:
-    tokens = _WORD.findall(text.lower())
+    tokens = _TOKEN.findall(text.casefold())
     if len(tokens) < size:
         return []
     return [" ".join(tokens[i : i + size]) for i in range(len(tokens) - size + 1)]
@@ -27,6 +31,7 @@ class StyleHistory(BaseModel):
     scene_patterns: dict[str, list[int]] = Field(default_factory=lambda: defaultdict(list))
     conflicts: dict[str, list[int]] = Field(default_factory=lambda: defaultdict(list))
     dialogue_patterns: dict[str, list[int]] = Field(default_factory=lambda: defaultdict(list))
+    narrative: NarrativeHistory = Field(default_factory=NarrativeHistory)
 
     def model_post_init(self, _context) -> None:
         self.phrases = defaultdict(list, self.phrases)

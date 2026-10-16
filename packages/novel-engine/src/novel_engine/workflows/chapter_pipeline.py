@@ -62,6 +62,11 @@ from novel_engine.style.canon import scan_context_alignment
 from novel_engine.style.commercial import scan_commercial_quality
 from novel_engine.style.chapter_repetition import scan_chapter_repetition
 from novel_engine.style.chapter_relevance import scan_chapter_relevance
+from novel_engine.style.narrative_fingerprint import (
+    NarrativeWarning,
+    assess_narrative_repetition,
+    record_narrative_plan,
+)
 from novel_engine.style.completeness import escalate_verdict, scan_prose_completeness
 from novel_engine.style.memory_continuity import scan_scene_handoffs
 from novel_engine.workflows.agent_workflow import AgentWorkflow, ChapterPassBundle
@@ -117,6 +122,7 @@ class DraftResult(BaseModel):
     length_warning: str | None = None
     repetition_check: dict = Field(default_factory=dict)
     relevance_check: dict = Field(default_factory=dict)
+    narrative_repetition: list[NarrativeWarning] = Field(default_factory=list)
 
 
 class ChapterVersion(BaseModel):
@@ -373,6 +379,15 @@ class ChapterGenerationPipeline:
                 watchlist=style.platform.monitored_phrases,
             )
         )
+        narrative_notes = assess_narrative_repetition(
+            chapter_number=chapter_number,
+            location=plan.location,
+            conflict=plan.conflict,
+            cliffhanger=plan.cliffhanger,
+            scenes=scenes,
+            history=self.style_history.narrative,
+        )
+        notes = (*notes, *(f"{item.category}: recent narrative pattern (x{item.frequency})" for item in narrative_notes))
         previous_chapter = await self.engine.chapters.get_by_number(project_id, chapter_number - 1) if chapter_number > 1 else None
         previous_memory = self.memory.store.chapter(project_id, chapter_number - 1) if chapter_number > 1 else None
         writer_context = build_writer_context(
@@ -715,6 +730,14 @@ class ChapterGenerationPipeline:
             chapters=await self.engine.chapters.list(project_id),
         )
         relevance_check = scan_chapter_relevance(content=prose, plan=loaded.plan, scenes=loaded.scenes)
+        narrative_repetition = assess_narrative_repetition(
+            chapter_number=chapter_number,
+            location=loaded.plan.location,
+            conflict=loaded.plan.conflict,
+            cliffhanger=loaded.plan.cliffhanger,
+            scenes=loaded.scenes,
+            history=self.style_history.narrative,
+        )
 
         persisted = None
         if persist:
@@ -745,6 +768,7 @@ class ChapterGenerationPipeline:
             length_warning=length_warning,
             repetition_check=repetition_check.model_dump(),
             relevance_check=relevance_check.model_dump(),
+            narrative_repetition=narrative_repetition,
         )
 
     async def _review_candidate(self, *, loaded, bundle, prose):
@@ -1097,6 +1121,14 @@ class ChapterGenerationPipeline:
             location=loaded.plan.location,
             conflict=loaded.plan.conflict,
             watchlist=loaded.style.platform.monitored_phrases,
+        )
+        record_narrative_plan(
+            self.style_history.narrative,
+            chapter_number=chapter_number,
+            location=loaded.plan.location,
+            conflict=loaded.plan.conflict,
+            cliffhanger=loaded.plan.cliffhanger,
+            scenes=loaded.scenes,
         )
         approved = await self.engine.chapters.approve(
             project_id,

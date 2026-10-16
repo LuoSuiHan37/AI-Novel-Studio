@@ -36,6 +36,10 @@ from novel_engine.providers.base import LLMProvider
 from novel_engine.providers.types import EmbedResult, GenerateResult, ProviderConfig, StreamChunk, TokenUsage
 from novel_engine.services.engine import NovelEngine
 from novel_engine.style.anti_repetition import StyleHistory, assess_repetition, record_chapter
+from novel_engine.style.narrative_fingerprint import (
+    assess_narrative_repetition,
+    record_narrative_plan,
+)
 from novel_engine.agents.contracts import WriterInput
 from novel_engine.workflows.agent_workflow import AgentWorkflow
 from novel_engine.workflows.chapter_pipeline import ChapterGenerationPipeline
@@ -549,3 +553,58 @@ def test_anti_repetition_is_frequency_based() -> None:
         watchlist=[SKIP_BEAT],
     )
     assert not any(item.item == SKIP_BEAT and item.category == "phrase" for item in banned)
+
+
+def test_anti_repetition_supports_chinese_phrases_and_ngrams() -> None:
+    history = StyleHistory()
+    for number in (1, 2):
+        record_chapter(
+            history,
+            chapter_number=number,
+            prose=f"第{number}章，雾里传来一声闷响。",
+            location="灰堤",
+            conflict="盐帮袭击",
+            watchlist=["雾里传来一声闷响"],
+        )
+    warnings = assess_repetition(
+        prose="第三章，雾里传来一声闷响。",
+        chapter_number=3,
+        location="石丘",
+        conflict="新的压力",
+        history=history,
+        watchlist=["雾里传来一声闷响"],
+    )
+    assert any(item.category == "phrase" for item in warnings)
+
+
+def test_narrative_fingerprint_warns_on_repeated_plan_shape() -> None:
+    class Scene:
+        def __init__(self, number: int):
+            self.scene_number = number
+            self.location = "盐池"
+            self.goal = "守住盐池"
+            self.conflict = "盐帮袭击"
+            self.turning_point = "敌人退入雾中"
+            self.information_revealed = "地底正在苏醒"
+            self.ending = "雾里传来闷响"
+
+    history = StyleHistory()
+    for number in (1, 2):
+        record_narrative_plan(
+            history.narrative,
+            chapter_number=number,
+            location="盐池",
+            conflict="盐帮袭击",
+            cliffhanger="雾里传来闷响",
+            scenes=[Scene(1)],
+        )
+    warnings = assess_narrative_repetition(
+        chapter_number=3,
+        location="盐池",
+        conflict="盐帮袭击",
+        cliffhanger="雾里传来闷响",
+        scenes=[Scene(1)],
+        history=history.narrative,
+    )
+    assert any(item.category == "narrative_pattern" for item in warnings)
+    assert any(item.category == "chapter_ending_pattern" for item in warnings)

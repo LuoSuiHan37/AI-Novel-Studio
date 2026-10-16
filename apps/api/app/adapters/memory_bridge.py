@@ -296,6 +296,10 @@ async def persist_commit(
             "scene_patterns": dict(pipeline.style_history.scene_patterns),
             "conflicts": dict(pipeline.style_history.conflicts),
             "dialogue_patterns": dict(pipeline.style_history.dialogue_patterns),
+            "narrative": {
+                "fingerprints": dict(pipeline.style_history.narrative.fingerprints),
+                "endings": dict(pipeline.style_history.narrative.endings),
+            },
         },
     }
     if existing is None:
