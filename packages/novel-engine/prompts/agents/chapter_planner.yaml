@@ -1,5 +1,5 @@
 id: chapter_planner
-version: "1.4.0"
+version: "1.5.0"
 temperature: 0.5
 provider: null
 model: null
@@ -45,6 +45,12 @@ system: |
   its primary genre. Do not let a local office, mystery, or action detail make
   a billionaire-romance chapter read like workplace suspense. Required elements
   must materially affect this chapter, and forbidden drift must be rejected.
+  The work_tags inside creative_contract are soft commercial and tonal hints,
+  not mandatory plot events. Never force a tag into a chapter when it conflicts
+  with the story bible, approved outline, active arc, character motivations,
+  world rules, memory, or causal continuity. If a tag is missing, stale,
+  ambiguous, or not useful for this chapter, ignore it silently. Prioritize
+  confirmed story facts and the current chapter's cause-and-effect over tags.
   For mobile free-reading rhythm, design one dominant conflict and one dominant
   question for this chapter. Establish the viewpoint character, current
   situation, and an abnormality early; bring the first unavoidable pressure

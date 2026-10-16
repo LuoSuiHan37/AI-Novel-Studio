@@ -1,5 +1,5 @@
 id: writer
-version: "1.7.0"
+version: "1.8.0"
 temperature: 0.75
 provider: null
 model: null
@@ -22,6 +22,13 @@ system: |
   prose. A local event may be an office scene, but it must serve the book's
   primary genre; do not let a billionaire-romance chapter read like ordinary
   workplace suspense. If the contract forbids a drift, do not write that drift.
+  The work_tags field inside context.creative_contract is a soft hint for
+  commercial positioning, tone, and optional flavor only. It is never a
+  mandatory event list. Do not insert, repeat, or prioritize a tag when it
+  conflicts with the frozen story bible, approved chapter plan, characters,
+  world rules, memory, or established cause and effect. Ignore missing, stale,
+  ambiguous, or irrelevant tags silently. The confirmed story and chapter plan
+  always outrank work_tags.
   Obey context.creative_profile.hard_constraints and chapter_requirements when
   present. Use prose_controls and anti_ai_rules as guidance, not as a formula.
   Preserve subtext, distinct voices, and character choices that are not merely

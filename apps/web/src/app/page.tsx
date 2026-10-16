@@ -121,7 +121,7 @@ export default function DashboardPage() {
   useEffect(() => {
     let active = true;
     Promise.resolve().then(async () => {
-      const projects = await api<Project[]>("/projects");
+      const projects = (await api<Project[]>("/projects")).filter((project) => project.extra_metadata?.creation_status !== "draft");
       const summaries = await Promise.all(projects.map(async (project) => {
         const [chapters, story] = await Promise.all([
           api<Chapter[]>(`/projects/${project.id}/chapters`).catch(() => []),

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Response, status
 
 from app.api.deps import Actor, confirmed_by, get_actor, get_engine, get_review_workflow, get_workflow
-from app.api.schemas import ActorOut, ConfirmBody, ProjectCreate, ProjectTitleSuggest, ProjectUpdate
+from app.api.schemas import ActorOut, ConfirmBody, CreationDraftSave, ProjectCreate, ProjectTitleSuggest, ProjectUpdate
 from app.services.book_snapshot import save_project_snapshot
 from app.services.creative_quality import rank_creative_candidates
 from app.services.prompt_optimization import optimization_report
@@ -229,6 +229,58 @@ async def create_project(
 @router.get("/projects")
 async def list_projects(engine: Annotated[NovelEngine, Depends(get_engine)]) -> list[NovelProject]:
     return await engine.list_projects()
+
+
+@router.get("/projects/creation-drafts")
+async def list_creation_drafts(engine: Annotated[NovelEngine, Depends(get_engine)]) -> list[NovelProject]:
+    projects = await engine.list_projects()
+    return [
+        project for project in projects
+        if (project.extra_metadata or {}).get("creation_status") == "draft"
+        and isinstance((project.extra_metadata or {}).get("creation_draft"), dict)
+    ]
+
+
+@router.post("/projects/creation-drafts", status_code=status.HTTP_201_CREATED)
+async def create_creation_draft(
+    body: CreationDraftSave,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+) -> NovelProject:
+    state = dict(body.state)
+    project = await engine.create_project(
+        NovelProject(
+            title=str(state.get("title") or f"未命名创建草稿-{uuid4().hex[:8]}"),
+            status=ProjectStatus.DRAFT,
+            genre=str(state.get("genre") or "werewolf_romance"),
+            target_platform="fanqie",
+            language=str(state.get("language") or "zh-CN"),
+            chapter_count_target=int(state.get("chapterCountTarget") or 120),
+            extra_metadata={"creation_status": "draft", "creation_draft": state},
+        )
+    )
+    await save_project_snapshot(engine, project.id)
+    return project
+
+
+@router.patch("/projects/{project_id}/creation-draft")
+async def save_creation_draft(
+    project_id: UUID,
+    body: CreationDraftSave,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+) -> NovelProject:
+    project = await engine.get_project(project_id)
+    metadata = dict(project.extra_metadata or {})
+    metadata["creation_status"] = "draft"
+    metadata["creation_draft"] = body.state
+    saved = await engine.update_project(project.model_copy(update={
+        "title": str(body.state.get("title") or project.title or "未命名创建草稿"),
+        "genre": str(body.state.get("genre") or project.genre),
+        "language": str(body.state.get("language") or project.language),
+        "chapter_count_target": int(body.state.get("chapterCountTarget") or project.chapter_count_target or 120),
+        "extra_metadata": metadata,
+    }))
+    await save_project_snapshot(engine, saved.id)
+    return saved
 
 
 @router.get("/projects/{project_id}")

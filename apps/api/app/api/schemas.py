@@ -50,6 +50,12 @@ class ProjectCreate(ApiModel):
     synopsis: str | None = None
 
 
+class CreationDraftSave(ApiModel):
+    """The resumable state of the multi-step book creation wizard."""
+
+    state: dict = Field(default_factory=dict)
+
+
 class ProjectTitleSuggest(ApiModel):
     genre: str = "werewolf_romance"
     target_platform: str = "alphanovel"
