@@ -1,5 +1,6 @@
 id: werewolf_romance
 name: Werewolf Romance
+subtype: rejected-mate and pack-power romance
 genres:
   - Werewolf Romance
 default_platform: alphanovel
@@ -19,6 +20,20 @@ writing_rules:
   - Keep pack law, rank, and mate-bond rules consistent with the World Bible.
   - Do not restore rank, Luna title, or pack standing without the stated challenge or rite.
   - POV must not know secrets marked unknown_to that character.
+behavior_rotation:
+  - protagonist acts independently
+  - pack authority applies pressure
+  - love interest loses control of the situation
+  - protagonist misjudges an ally
+  - public choice changes status
+reveal_policy:
+  - Reveal one major relationship fact at a time.
+  - Consequences must follow rank or bond revelations before another reveal.
+anti_template_rules:
+  - Do not repeat rejection, rescue, warning, and secret reveal as the same chapter shape.
+phase_rules:
+  investigation:
+    - Keep at least one contradictory witness or piece of evidence.
 continuity_signals:
   - rule_contains: severs
     error_if_prose_contains:

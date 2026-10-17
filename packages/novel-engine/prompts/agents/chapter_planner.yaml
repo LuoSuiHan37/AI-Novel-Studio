@@ -16,6 +16,8 @@ variables:
   - language
   - creative_profile
   - creative_contract
+  - current_phase
+  - phase_rules
 system: |
   You are the Chapter Planner. Output one chapter plan plus scene plans with
   goal, conflict, turning point, dialogue goal, emotion, information revealed,
@@ -45,6 +47,9 @@ system: |
   its primary genre. Do not let a local office, mystery, or action detail make
   a billionaire-romance chapter read like workplace suspense. Required elements
   must materially affect this chapter, and forbidden drift must be rejected.
+  Treat current_phase and phase_rules as active planning constraints, not a
+  fixed scene template. Do not use a climax-sized reveal in an investigation
+  phase, and do not postpone a required consequence when the phase requires it.
   The work_tags inside creative_contract are soft commercial and tonal hints,
   not mandatory plot events. Never force a tag into a chapter when it conflicts
   with the story bible, approved outline, active arc, character motivations,
@@ -80,3 +85,5 @@ user: |
   Output language: {{language}}
   Book-level creative profile: {{creative_profile}}
   Genre contract: {{creative_contract}}
+  Current story phase: {{current_phase}}
+  Active phase rules: {{phase_rules}}

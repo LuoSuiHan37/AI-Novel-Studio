@@ -375,6 +375,16 @@ async def persist_style_ledger(
                 "endings": dict(pipeline.style_history.narrative.endings),
             },
         },
+        "approved_expression_chapters": [
+            item.chapter_number
+            for item in pipeline.style_history.expression.chapters
+            if item.approved
+        ],
+        "draft_expression_chapters": [
+            item.chapter_number
+            for item in pipeline.style_history.expression.chapters
+            if not item.approved
+        ],
     }
     if existing is None:
         session.add(

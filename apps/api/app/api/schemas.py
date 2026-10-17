@@ -94,6 +94,14 @@ class ProjectUpdate(BaseModel):
     creative_profile: dict | None = None
 
 
+class ChapterQualityFeedback(ApiModel):
+    chapter_number: int = Field(ge=1)
+    score: int = Field(ge=1, le=10)
+    labels: list[str] = Field(default_factory=list, max_length=12)
+    note: str = Field(default="", max_length=2000)
+    approved_for_style_learning: bool = False
+
+
 class CreationPitch(ApiModel):
     premise: str
     theme: str

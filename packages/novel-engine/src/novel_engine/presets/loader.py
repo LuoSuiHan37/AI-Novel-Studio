@@ -26,7 +26,10 @@ def presets_root() -> Path:
 def load_platform_preset(preset_id: str) -> PlatformPreset:
     path = presets_root() / "platforms" / f"{preset_id}.yaml"
     if not path.is_file():
-        path = presets_root() / "platforms" / "alphanovel.yaml"
+        raise FileNotFoundError(
+            f"Unknown platform preset '{preset_id}'. Add a preset under "
+            f"{presets_root() / 'platforms'} instead of silently using another platform's rules."
+        )
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
     return PlatformPreset.model_validate(payload)
 
@@ -36,7 +39,10 @@ def load_novel_preset(preset_id: str) -> NovelPreset:
     slug = (preset_id or "werewolf_romance").replace(" ", "_").lower()
     path = presets_root() / "novels" / f"{slug}.yaml"
     if not path.is_file():
-        path = presets_root() / "novels" / "werewolf_romance.yaml"
+        raise FileNotFoundError(
+            f"Unknown novel preset '{preset_id}'. Add a preset under "
+            f"{presets_root() / 'novels'} instead of silently using werewolf romance rules."
+        )
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
     return NovelPreset.model_validate(payload)
 

@@ -43,6 +43,12 @@ class NovelPreset(BaseModel):
     tropes: list[str] = Field(default_factory=list)
     writing_rules: list[str] = Field(default_factory=list)
     continuity_signals: list[ContinuitySignal] = Field(default_factory=list)
+    subtype: str = ""
+    narrative_engine: str = ""
+    behavior_rotation: list[str] = Field(default_factory=list)
+    reveal_policy: list[str] = Field(default_factory=list)
+    anti_template_rules: list[str] = Field(default_factory=list)
+    phase_rules: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class StyleBundle(BaseModel):
@@ -65,6 +71,23 @@ class StyleBundle(BaseModel):
         ]
         lines.append("Rules:")
         lines.extend(f"- {item}" for item in [*self.platform.writing_rules, *self.novel.writing_rules])
+        if self.novel.subtype:
+            lines.append(f"Sub-genre: {self.novel.subtype}")
+        if self.novel.narrative_engine:
+            lines.append(f"Narrative engine: {self.novel.narrative_engine}")
+        if self.novel.behavior_rotation:
+            lines.append("Behavior rotation:")
+            lines.extend(f"- {item}" for item in self.novel.behavior_rotation)
+        if self.novel.reveal_policy:
+            lines.append("Reveal policy:")
+            lines.extend(f"- {item}" for item in self.novel.reveal_policy)
+        if self.novel.anti_template_rules:
+            lines.append("Anti-template rules:")
+            lines.extend(f"- {item}" for item in self.novel.anti_template_rules)
+        if self.novel.phase_rules:
+            lines.append("Phase rules (select only the current phase):")
+            for phase, rules in self.novel.phase_rules.items():
+                lines.append(f"- {phase}: " + "；".join(rules))
         if self.platform.avoid:
             lines.append("Avoid:")
             lines.extend(f"- {item}" for item in self.platform.avoid)

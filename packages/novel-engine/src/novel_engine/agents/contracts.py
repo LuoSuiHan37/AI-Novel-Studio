@@ -162,6 +162,8 @@ class ChapterPlannerInput(AgentModel):
     language: str = "en"
     creative_profile: dict = Field(default_factory=dict)
     creative_contract: dict = Field(default_factory=dict)
+    current_phase: str = ""
+    phase_rules: list[str] = Field(default_factory=list)
 
 
 class SceneDraft(AgentModel):
@@ -239,6 +241,8 @@ class WriterContext(AgentModel):
     relationship_ledger: list[dict] = Field(default_factory=list)
     story_state_ledger: str = ""
     creative_contract: dict = Field(default_factory=dict)
+    current_phase: str = ""
+    phase_rules: tuple[str, ...] = ()
 
 
 class WriterInput(AgentModel):

@@ -24,6 +24,7 @@ class ChapterExpressionFingerprint(BaseModel):
     dialogue_ratio: float = 0.0
     short_sentence_ratio: float = 0.0
     behavior_modes: list[str] = Field(default_factory=list)
+    approved: bool = False
 
 
 class ExpressionHistory(BaseModel):
@@ -230,7 +231,14 @@ def build_sequence_guidance(*, history: ExpressionHistory, ledger: RevealLedger,
     return notes
 
 
-def record_expression(history: ExpressionHistory, fingerprint: ChapterExpressionFingerprint) -> None:
+def record_expression(
+    history: ExpressionHistory,
+    fingerprint: ChapterExpressionFingerprint,
+    *,
+    approved: bool | None = None,
+) -> None:
+    if approved is not None:
+        fingerprint = fingerprint.model_copy(update={"approved": approved})
     history.chapters = [item for item in history.chapters if item.chapter_number != fingerprint.chapter_number]
     history.chapters.append(fingerprint)
     history.chapters.sort(key=lambda item: item.chapter_number)

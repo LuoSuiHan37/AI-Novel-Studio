@@ -78,6 +78,7 @@ from novel_engine.style.sequence_controls import (
     record_reveals,
     reveal_items,
 )
+from novel_engine.style.story_phase import classify_story_phase
 from novel_engine.style.completeness import escalate_verdict, scan_prose_completeness
 from novel_engine.style.memory_continuity import scan_scene_handoffs
 from novel_engine.workflows.agent_workflow import AgentWorkflow, ChapterPassBundle
@@ -336,12 +337,32 @@ class ChapterGenerationPipeline:
                 + ", ".join(missing_character_names)
             )
         creative_profile = (project.extra_metadata or {}).get("creative_profile", {})
+        feedback = [
+            item
+            for item in ((project.extra_metadata or {}).get("quality_feedback") or [])
+            if isinstance(item, dict) and item.get("approved_for_style_learning")
+        ][-8:]
+        if feedback:
+            creative_profile = dict(creative_profile) if isinstance(creative_profile, dict) else {}
+            learned_rules = list(creative_profile.get("anti_ai_rules") or [])
+            learned_rules.extend(
+                f"用户反馈（仅用于本作品）：避免{label}"
+                for item in feedback
+                for label in item.get("labels") or []
+                if str(label).strip()
+            )
+            creative_profile["anti_ai_rules"] = list(dict.fromkeys(learned_rules))[-16:]
         creative_contract = contract_for_project(project)
         style = resolve_style_bundle(
             platform_id=project.target_platform,
             novel_id=project.genre,
             language=project.language,
         )
+        phase = classify_story_phase(
+            chapter_number=chapter_number,
+            target_chapters=project.chapter_count_target,
+        )
+        phase_rules = list(style.novel.phase_rules.get(phase.key, []))
         profile_style = creative_profile.get("style_guide", "") if isinstance(creative_profile, dict) else ""
         if profile_style:
             style = style.model_copy(update={"style_guide": f"{style.style_guide}\n{profile_style}"})
@@ -435,6 +456,8 @@ class ChapterGenerationPipeline:
             ),
             language=project.language,
             creative_profile=creative_profile,
+            current_phase=phase.label,
+            phase_rules=phase_rules,
             story_state_ledger=self.memory.store.story_state_ledger(project_id),
             creative_contract=creative_contract,
             chapter_word_min=style.platform.chapter_word_min,
@@ -514,6 +537,8 @@ class ChapterGenerationPipeline:
                     current_arc=loaded.arc.summary if loaded.arc else "",
                     language=loaded.writer_context.language,
                     creative_contract=loaded.writer_context.creative_contract,
+                    current_phase=loaded.writer_context.current_phase,
+                    phase_rules=list(loaded.writer_context.phase_rules),
                 )
             )
         if not scenes:
@@ -811,6 +836,23 @@ class ChapterGenerationPipeline:
                 chapter_number=chapter_number,
             ),
         ]
+        # Rebuild the final continuity result after all revisions. A revision
+        # is not allowed to remove the sequence/reveal audit that was produced
+        # for the selected text.
+        final_sequence_findings = [
+            ContinuityFinding(
+                severity=ContinuityVerdict.WARNING,
+                category=item.category,
+                problem=item.note,
+                evidence=f"chapters: {', '.join(str(number) for number in item.chapters)}",
+                recommendation=item.recommendation,
+            )
+            for item in sequence_review
+        ]
+        continuity = ContinuityOutput(
+            overall=escalate_verdict(continuity.overall, final_sequence_findings),
+            findings=[*continuity.findings, *final_sequence_findings],
+        )
 
         persisted = None
         if persist:
@@ -1221,7 +1263,7 @@ class ChapterGenerationPipeline:
             scenes=loaded.scenes,
             watchlist=loaded.style.platform.monitored_phrases,
         )
-        record_expression(self.style_history.expression, expression_fingerprint)
+        record_expression(self.style_history.expression, expression_fingerprint, approved=True)
         record_reveals(
             self.style_history.reveals,
             chapter_number=chapter_number,

@@ -48,6 +48,10 @@ system: |
   chapter title, goal, conflict, emotional arc, reveal, setup, payoff, and
   cliffhanger. Write the listed scenes in order and include each scene's goal,
   conflict, turning point, dialogue goal, information revealed, and ending.
+  Treat context.current_phase and context.phase_rules as active constraints for
+  reveal size, consequences, and pacing. Do not expose phase labels in prose.
+  When present, every scene must respect protagonist_want, active_pressure,
+  choice_and_cost, irreversible_change, and environment_pressure.
   Invent connective prose and sensory detail, but do not replace the plan's
   events with a different storyline. Make emotional changes and decisions
   causally earned: show the character noticing evidence, hesitating or testing

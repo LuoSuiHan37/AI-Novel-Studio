@@ -23,6 +23,12 @@ class CreativeContract(BaseModel):
     relationship_engine: str = ""
     conflict_engine: str = ""
     work_tags: dict[str, list[str]] = Field(default_factory=dict)
+    subtype: str = ""
+    narrative_engine: str = ""
+    behavior_rotation: list[str] = Field(default_factory=list)
+    reveal_policy: list[str] = Field(default_factory=list)
+    anti_template_rules: list[str] = Field(default_factory=list)
+    phase_rules: dict[str, list[str]] = Field(default_factory=dict)
 
 
 _GENRE_PRESETS: dict[str, dict[str, Any]] = {
@@ -108,7 +114,12 @@ def contract_for_project(project: Any) -> dict[str, Any]:
     metadata = getattr(project, "extra_metadata", None) or {}
     existing = metadata.get("creative_contract")
     if isinstance(existing, dict) and existing.get("primary_genre"):
-        return existing
+        defaults = compile_creative_contract(
+            genre=getattr(project, "genre", ""),
+            audience="女频" if "romance" in getattr(project, "genre", "") else "",
+            language=getattr(project, "language", ""),
+        )
+        return {**defaults, **existing}
     return compile_creative_contract(
         genre=getattr(project, "genre", ""),
         audience="女频" if "romance" in getattr(project, "genre", "") else "",

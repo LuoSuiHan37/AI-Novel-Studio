@@ -111,6 +111,11 @@ def plan_to_agent(plan: ChapterPlan, scenes: list[ScenePlan]) -> ChapterPlannerO
                 emotion=item.emotion,
                 information_revealed=item.information_revealed,
                 ending=item.ending,
+                protagonist_want=item.protagonist_want,
+                active_pressure=item.active_pressure,
+                choice_and_cost=item.choice_and_cost,
+                irreversible_change=item.irreversible_change,
+                environment_pressure=item.environment_pressure,
                 target_word_count=item.target_word_count,
                 target_word_min=item.target_word_min,
                 target_word_max=item.target_word_max,
@@ -215,6 +220,8 @@ def build_writer_context(
     chapter_word_max: int = 2500,
     story_state_ledger: str = "",
     creative_contract: dict | None = None,
+    current_phase: str = "",
+    phase_rules: list[str] | None = None,
 ) -> WriterContext:
     rules = [rule.description for rule in (world.rules if world else []) if rule.description.strip()]
     if not rules and world is not None and world.summary.strip():
@@ -286,4 +293,6 @@ def build_writer_context(
         relationship_ledger=writer_profile.get("relationship_ledger", []),
         story_state_ledger=story_state_ledger,
         creative_contract=creative_contract or {},
+        current_phase=current_phase,
+        phase_rules=tuple(phase_rules or []),
     )

@@ -56,6 +56,7 @@ from novel_engine.creative.contract import contract_for_project
 from novel_engine.models.enums import ApprovalStatus, ChapterStatus, ContinuitySeverity, ContinuityVerdict, ProjectStatus
 from novel_engine.models.enums import EpistemicStatus, Importance, MemoryLayer, MemoryType
 from novel_engine.presets.loader import resolve_style_bundle
+from novel_engine.style.quality_gate import evaluate_chapter_quality
 from novel_engine.providers.base import LLMProvider
 from novel_engine.providers.types import ChatMessage
 from novel_engine.services.engine import NovelEngine
@@ -814,13 +815,15 @@ async def generate_chapter(
         project = await engine.get_project(project_id)
         length_check = _chapter_length_check(project, chapter_row.content)
         commercial = result.secondary_commercial
-        commercial_blocked = review_workflow is not None and (
-            commercial is None
-            or commercial.needs_human_review
-            or commercial.reader_pressure_score < 6
-            or commercial.reader_promise_score < 6
-            or commercial.rhythm_score < 6
-            or commercial.ai_style_risk_score < 5
+        quality_gate = evaluate_chapter_quality(
+            continuity=result.continuity,
+            editor=result.bundle.editor.output,
+            length_ok=result.length_ok,
+            repetition_check=result.repetition_check,
+            relevance_check=result.relevance_check,
+            sequence_review=result.sequence_review,
+            commercial=commercial,
+            require_independent_review=True,
         )
         optimization_signals = chapter_optimization_signals(
             chapter_number=number,
@@ -834,12 +837,7 @@ async def generate_chapter(
         )
         metadata["audit"] = {
             "status": (
-                "completed_with_errors"
-                if result.continuity.overall is ContinuityVerdict.ERROR
-                or result.bundle.editor.output.needs_human_review
-                or commercial_blocked
-                or not result.length_ok
-                else "completed"
+                "blocked" if not quality_gate.passed else "passed"
             ),
             "versions": [item.model_dump() for item in result.versions],
             "repetition_check": result.repetition_check,
@@ -848,6 +846,12 @@ async def generate_chapter(
             "independent_commercial": commercial.model_dump() if commercial else None,
             "content_fingerprint": _content_fingerprint(chapter_row.content),
             "length_check": length_check,
+            "sequence_review": [item.model_dump(mode="json") for item in result.sequence_review],
+            "quality_gate": {
+                "status": quality_gate.status,
+                "blocking_reasons": list(quality_gate.blocking_reasons),
+                "warnings": list(quality_gate.warnings),
+            },
             "optimization_signals": optimization_signals,
         }
         await engine.chapters.update(chapter_row.model_copy(update={"extra_metadata": metadata}))
@@ -872,15 +876,17 @@ async def generate_chapter(
             await session.commit()
         await save_project_snapshot(engine, project_id)
     auto_approved = False
-    if (
-        body.persist
-        and result.continuity.overall is not ContinuityVerdict.ERROR
-        and not result.repetition_check.get("blocked", False)
-        and not result.relevance_check.get("blocked", False)
-        and not result.bundle.editor.output.needs_human_review
-        and result.length_ok
-        and not commercial_blocked
-    ):
+    quality_gate = evaluate_chapter_quality(
+        continuity=result.continuity,
+        editor=result.bundle.editor.output,
+        length_ok=result.length_ok,
+        repetition_check=result.repetition_check,
+        relevance_check=result.relevance_check,
+        sequence_review=result.sequence_review,
+        commercial=result.secondary_commercial,
+        require_independent_review=True,
+    )
+    if body.persist and quality_gate.passed and review_workflow is not None:
         # Automatic mode keeps the same audit gates but records the approval
         # as a system action instead of waiting for a UI confirmation click.
         await engine.chapters.mark_reviewed(project_id, number)
@@ -916,21 +922,7 @@ async def generate_chapter(
         "versions": result.versions,
         "independent_review_available": review_workflow is not None,
         "review_status": (
-            "completed_with_errors"
-            if result.continuity.overall is ContinuityVerdict.ERROR
-            or result.bundle.editor.output.needs_human_review
-            or (
-                review_workflow is not None
-                and (
-                    result.secondary_commercial is None
-                    or result.secondary_commercial.needs_human_review
-                    or result.secondary_commercial.reader_pressure_score < 6
-                    or result.secondary_commercial.reader_promise_score < 6
-                    or result.secondary_commercial.rhythm_score < 6
-                    or result.secondary_commercial.ai_style_risk_score < 5
-                )
-            )
-            else "completed"
+            "passed" if quality_gate.passed else "blocked"
         ),
         "memory_proposals": result.bundle.memory.output,
         "hook_proposals": result.bundle.hooks.output,
@@ -941,7 +933,7 @@ async def generate_chapter(
         "length_ok": result.length_ok,
         "length_warning": result.length_warning,
         "persisted": body.persist,
-        "requires_human_approval": False,
+        "requires_human_approval": not auto_approved,
         "auto_approved": auto_approved,
         "advances_next_chapter": False,
     }

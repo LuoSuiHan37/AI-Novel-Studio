@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from collections import Counter
 from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Response, status
 
 from app.api.deps import Actor, confirmed_by, get_actor, get_engine, get_review_workflow, get_workflow
-from app.api.schemas import ActorOut, ConfirmBody, CreationDraftSave, ProjectCreate, ProjectTitleSuggest, ProjectUpdate
+from app.api.schemas import ActorOut, ChapterQualityFeedback, ConfirmBody, CreationDraftSave, ProjectCreate, ProjectTitleSuggest, ProjectUpdate
 from app.services.book_snapshot import save_project_snapshot
 from app.services.creative_quality import rank_creative_candidates
 from app.services.prompt_optimization import optimization_report
@@ -298,6 +299,69 @@ async def list_project_reviews(
 ) -> list[dict]:
     project = await engine.get_project(project_id)
     return list((project.extra_metadata or {}).get("quality_reviews") or [])
+
+
+@router.post("/projects/{project_id}/reviews/feedback")
+async def add_chapter_quality_feedback(
+    project_id: UUID,
+    body: ChapterQualityFeedback,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+    actor: Annotated[Actor, Depends(get_actor)],
+) -> dict:
+    """Store structured human feedback without silently changing canon rules.
+
+    Feedback is isolated to the current project. It becomes a writing rule
+    only when the user explicitly marks it as approved for style learning.
+    """
+    project = await engine.get_project(project_id)
+    chapter = await engine.chapters.get_by_number(project_id, body.chapter_number)
+    metadata = dict(project.extra_metadata or {})
+    feedback = list(metadata.get("quality_feedback") or [])
+    item = {
+        "chapter_number": body.chapter_number,
+        "score": body.score,
+        "labels": list(dict.fromkeys(body.labels)),
+        "note": body.note.strip(),
+        "approved_for_style_learning": body.approved_for_style_learning,
+        "actor": actor.id,
+    }
+    feedback.append(item)
+    metadata["quality_feedback"] = feedback[-200:]
+    saved = await engine.update_project(project.model_copy(update={"extra_metadata": metadata}))
+    return {"feedback": item, "chapter_status": chapter.status, "project_id": saved.id}
+
+
+@router.get("/projects/{project_id}/reviews/feedback/summary")
+async def summarize_chapter_quality_feedback(
+    project_id: UUID,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+) -> dict:
+    """Summarize feedback; recommendations remain project-local and explicit."""
+    project = await engine.get_project(project_id)
+    items = [
+        item for item in ((project.extra_metadata or {}).get("quality_feedback") or [])
+        if isinstance(item, dict)
+    ]
+    labels = Counter(
+        str(label).strip()
+        for item in items
+        for label in item.get("labels") or []
+        if str(label).strip()
+    )
+    approved = [item for item in items if item.get("approved_for_style_learning")]
+    average = round(sum(int(item.get("score", 0) or 0) for item in items) / len(items), 2) if items else None
+    recommendations = [
+        {"label": label, "count": count, "rule": f"本作品后续章节重点避免：{label}"}
+        for label, count in labels.most_common()
+    ]
+    return {
+        "project_id": project_id,
+        "feedback_count": len(items),
+        "approved_for_style_learning": len(approved),
+        "average_score": average,
+        "labels": dict(labels),
+        "recommendations": recommendations,
+    }
 
 
 @router.get("/projects/{project_id}/reviews/optimization")

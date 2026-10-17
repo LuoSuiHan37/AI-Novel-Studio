@@ -273,9 +273,13 @@ def test_project_story_character_world_plot_arc_chapter_memory_settings() -> Non
             )
             assert generated.status_code == 200, generated.text
             assert "rejected Aria" in generated.json()["chapter"]["content"]
-            assert generated.json()["auto_approved"] is True
-            assert generated.json()["review_status"] == "completed"
-            assert generated.json()["chapter"]["status"] == "approved"
+            # Automatic promotion requires the independent review gate.
+            # Without a configured reviewer the generated chapter remains
+            # a draft and must not enter canon silently.
+            assert generated.json()["auto_approved"] is False
+            assert generated.json()["requires_human_approval"] is True
+            assert generated.json()["review_status"] == "blocked"
+            assert generated.json()["chapter"]["status"] == "draft"
             detail = client.get(f"/projects/{project_id}/chapters/1")
             assert detail.status_code == 200
             assert detail.json()["plan"]["chapter_title"] == "The Rejection"
@@ -284,8 +288,11 @@ def test_project_story_character_world_plot_arc_chapter_memory_settings() -> Non
             assert client.get(f"/projects/{project_id}/timeline").status_code == 200
             hooks = client.get(f"/projects/{project_id}/hooks")
             assert hooks.status_code == 200
-            assert any("princess" in item["description"] for item in hooks.json())
-            assert client.get(f"/projects/{project_id}/foreshadowing").status_code == 200
+            # Draft proposals are not promoted to canon before approval.
+            assert hooks.json() == []
+            foreshadowing = client.get(f"/projects/{project_id}/foreshadowing")
+            assert foreshadowing.status_code == 200
+            assert foreshadowing.json() == []
 
             llm = client.patch(
                 f"/projects/{project_id}/settings/llm",

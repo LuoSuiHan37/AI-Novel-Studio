@@ -524,6 +524,11 @@ def test_platform_preset_is_not_hardcoded_in_core_strings() -> None:
     assert "1500" not in source
 
 
+def test_unknown_preset_fails_loudly_instead_of_using_another_genres_rules() -> None:
+    with pytest.raises(FileNotFoundError, match="Unknown novel preset"):
+        resolve_style_bundle(platform_id="alphanovel", novel_id="does_not_exist")
+
+
 def test_anti_repetition_is_frequency_based() -> None:
     history = StyleHistory()
     for number in (1, 2):
