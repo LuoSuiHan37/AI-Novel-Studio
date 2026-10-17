@@ -20,7 +20,12 @@ class RetrievalPipeline:
         self._store = store
         self._embedder = embedder
 
-    def retrieve(self, request: RetrievalRequest) -> ContextPackage:
+    def retrieve(
+        self,
+        request: RetrievalRequest,
+        *,
+        query_embedding: list[float] | None = None,
+    ) -> ContextPackage:
         global_memory = self._store.get_global(request.project_id)
         world = global_memory.world if global_memory else ""
         master_plot = global_memory.master_plot if global_memory else ""
@@ -34,7 +39,7 @@ class RetrievalPipeline:
         all_records = self._store.records_for(request.project_id)
         forbidden = build_forbidden_map(all_records, request.characters)
 
-        semantic = self._semantic_hits(request)
+        semantic = self._semantic_hits(request, query_embedding=query_embedding)
         semantic = filter_records_for_pov(semantic, request.pov)
 
         hooks = self._unresolved_hooks(request, recent)
@@ -92,19 +97,13 @@ class RetrievalPipeline:
         scored.sort(key=lambda item: (-item[0], item[1].sequence))
         return [event for _, event in scored[:8]]
 
-    def _semantic_hits(self, request: RetrievalRequest) -> list[MemoryRecord]:
-        query = " ".join(
-            [
-                request.chapter_title,
-                request.location,
-                " ".join(request.characters),
-                request.current_arc or "",
-                request.chapter_goal,
-                request.conflict,
-                " ".join(request.active_hooks),
-            ]
-        )
-        query_vec = self._embedder.embed(query)
+    def _semantic_hits(
+        self,
+        request: RetrievalRequest,
+        *,
+        query_embedding: list[float] | None = None,
+    ) -> list[MemoryRecord]:
+        query_vec = query_embedding or self._embedder.embed(retrieval_query_text(request))
         ranked: list[tuple[float, MemoryRecord]] = []
         for vector in self._store.vectors_for(request.project_id):
             score = cosine_similarity(query_vec, vector.embedding)
@@ -113,7 +112,6 @@ class RetrievalPipeline:
             ranked.append((score, vector))
         ranked.sort(key=lambda item: item[0], reverse=True)
         return [item for _, item in ranked[: request.semantic_top_k]]
-
     def _related_chapters(
         self, request: RetrievalRequest, recent: list[ChapterMemory]
     ) -> list[ChapterMemory]:
@@ -184,3 +182,17 @@ class RetrievalPipeline:
             }
         )
         return fitted.model_copy(update={"token_estimate": estimate()})
+
+
+def retrieval_query_text(request: RetrievalRequest) -> str:
+    return " ".join(
+        [
+            request.chapter_title,
+            request.location,
+            " ".join(request.characters),
+            request.current_arc or "",
+            request.chapter_goal,
+            request.conflict,
+            " ".join(request.active_hooks),
+        ]
+    )

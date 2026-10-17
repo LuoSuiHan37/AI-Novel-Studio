@@ -14,6 +14,9 @@ from novel_engine.memory.service import MemoryService
 from novel_engine.models.enums import EpistemicStatus, Importance, MemoryLayer, MemoryType
 from novel_engine.models.story_state import StoryState
 from novel_engine.style.anti_repetition import StyleHistory
+from novel_engine.presets.loader import resolve_style_bundle
+from novel_engine.style.sequence_controls import fingerprint_chapter, record_expression, record_reveals, reveal_items
+from novel_engine.models.enums import ChapterStatus
 from novel_engine.workflows.chapter_pipeline import CommitResult, ChapterGenerationPipeline
 
 
@@ -103,7 +106,11 @@ async def hydrate_pipeline_memory(
                 # Pydantic receives the same keyword twice.
                 **record.model_dump(exclude={"layer"}),
                 layer=MemoryLayer.VECTOR,
-                embedding=memory.embedder.embed(record.content),
+                embedding=(
+                    list(row.embedding)
+                    if row.embedding is not None
+                    else memory.embedder.embed(record.content)
+                ),
             )
         )
 
@@ -125,6 +132,41 @@ async def hydrate_pipeline_memory(
                 location=row.location or "",
                 characters=[],
             )
+        )
+    return history
+
+
+async def hydrate_draft_expression_history(
+    engine,
+    project_id: uuid.UUID,
+    history: StyleHistory,
+) -> StyleHistory:
+    """Backfill expression-only history from saved drafts without canon promotion."""
+    project = await engine.get_project(project_id)
+    style = resolve_style_bundle(
+        platform_id=project.target_platform,
+        novel_id=project.genre,
+        language=project.language,
+    )
+    for chapter in await engine.chapters.list(project_id):
+        if not chapter.content.strip() or chapter.status is ChapterStatus.APPROVED:
+            continue
+        plan = await engine.uow.chapter_plans.latest_for_chapter(chapter.id)
+        if plan is None:
+            continue
+        scenes = await engine.scene_plans.list(plan.id)
+        fingerprint = fingerprint_chapter(
+            chapter_number=chapter.chapter_number,
+            prose=chapter.content,
+            plan=plan,
+            scenes=scenes,
+            watchlist=style.platform.monitored_phrases,
+        )
+        record_expression(history.expression, fingerprint)
+        record_reveals(
+            history.reveals,
+            chapter_number=chapter.chapter_number,
+            items=reveal_items(plan, scenes),
         )
     return history
 
@@ -285,6 +327,36 @@ async def persist_commit(
             involved_character_ids=list(result.timeline.characters),
         )
     )
+    await persist_style_ledger(session, project_id, pipeline)
+    # Embed newly-created rows in one batch after all memory writes have been
+    # assembled. Providers with a non-1536 vector are kept in the in-memory
+    # index but are not written into the fixed-width pgvector column.
+    await session.flush()
+    pending = (
+        await session.scalars(
+            select(StoryMemory).where(
+                StoryMemory.project_id == project_id,
+                StoryMemory.embedding.is_(None),
+            )
+        )
+    ).all()
+    if pending:
+        embeddings = await pipeline.memory.embed_texts([row.content for row in pending])
+        for row, embedding in zip(pending, embeddings, strict=True):
+            if len(embedding) == 1536:
+                row.embedding = embedding
+
+    # The route owns the transaction so approval and memory writes commit
+    # together or roll back together.
+    await session.flush()
+
+
+async def persist_style_ledger(
+    session: AsyncSession,
+    project_id: uuid.UUID,
+    pipeline: ChapterGenerationPipeline,
+) -> None:
+    """Persist draft/approved expression history without promoting canon facts."""
     rows = (
         await session.scalars(select(StoryMemory).where(StoryMemory.project_id == project_id))
     ).all()
@@ -296,6 +368,8 @@ async def persist_commit(
             "scene_patterns": dict(pipeline.style_history.scene_patterns),
             "conflicts": dict(pipeline.style_history.conflicts),
             "dialogue_patterns": dict(pipeline.style_history.dialogue_patterns),
+            "expression": pipeline.style_history.expression.model_dump(mode="json"),
+            "reveals": pipeline.style_history.reveals.model_dump(mode="json"),
             "narrative": {
                 "fingerprints": dict(pipeline.style_history.narrative.fingerprints),
                 "endings": dict(pipeline.style_history.narrative.endings),
@@ -311,13 +385,11 @@ async def persist_commit(
                 epistemic_status=EpistemicStatus.TENTATIVE_FACT.value,
                 content="style ledger",
                 dedupe_key=_dedupe_key("style_ledger", project_id),
-                tags=["style_ledger"],
+                tags=["style_ledger", "draft_safe"],
                 extra_metadata=payload,
             )
         )
     else:
         existing.extra_metadata = payload
         flag_modified(existing, "extra_metadata")
-    # The route owns the transaction so approval and memory writes commit
-    # together or roll back together.
     await session.flush()

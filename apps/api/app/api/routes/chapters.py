@@ -12,7 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.adapters.memory_bridge import _fact_dedupe_key, hydrate_pipeline_memory, persist_commit
+from app.adapters.memory_bridge import (
+    _fact_dedupe_key,
+    hydrate_pipeline_memory,
+    hydrate_draft_expression_history,
+    persist_commit,
+    persist_style_ledger,
+)
 from app.api.context_builder import build_writer_context
 from app.api.deps import (
     Actor,
@@ -43,6 +49,7 @@ from novel_engine.agents.contracts import (
     WriterInput,
 )
 from novel_engine.domain.errors import InvalidStateError
+from novel_engine.memory.embeddings import ProviderEmbedder
 from novel_engine.memory.service import MemoryService
 from novel_engine.models.entities import ChapterPlan, Hook, ScenePlan
 from novel_engine.creative.contract import contract_for_project
@@ -66,6 +73,7 @@ from novel_engine.style.chapter_relevance import scan_chapter_relevance
 from novel_engine.style.completeness import escalate_verdict, scan_prose_completeness
 from novel_engine.style.word_count import count_text_units
 from novel_engine.style.signals import scan_continuity_signals
+from novel_engine.style.anti_repetition import StyleHistory
 from novel_engine.agents.contracts import ChapterPlannerInput, ContinuityInput, EditorInput, OutlineOutput, ReviseInput
 from novel_engine.workflows.context import character_to_agent, plot_to_outline, story_bible_to_architect
 
@@ -858,6 +866,10 @@ async def generate_chapter(
             }))
         if chapter_row.content.strip():
             await _sync_project_writing_status(engine, project_id)
+        session = getattr(engine.uow, "session", None)
+        if isinstance(session, AsyncSession):
+            await persist_style_ledger(session, project_id, pipeline)
+            await session.commit()
         await save_project_snapshot(engine, project_id)
     auto_approved = False
     if (
@@ -1555,11 +1567,12 @@ async def _pipeline(
     *,
     review_workflow: AgentWorkflow | None = None,
 ) -> ChapterGenerationPipeline:
-    memory = MemoryService()
+    memory = MemoryService(async_embedder=ProviderEmbedder(workflow.provider))
     history = None
     session = getattr(engine.uow, "session", None)
     if isinstance(session, AsyncSession):
         history = await hydrate_pipeline_memory(session, project_id, memory)
+    history = await hydrate_draft_expression_history(engine, project_id, history or StyleHistory())
     return ChapterGenerationPipeline(
         engine, workflow, memory, style_history=history, review_workflow=review_workflow
     )

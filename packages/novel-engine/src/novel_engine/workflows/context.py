@@ -169,6 +169,31 @@ def snippets_from_package(package: ContextPackage) -> list[MemorySnippet]:
     return items
 
 
+def _writer_creative_profile(profile: dict | None) -> dict:
+    """Keep writer-facing guidance, excluding research dumps and future plans."""
+    if not isinstance(profile, dict):
+        return {}
+    allowed = (
+        "style_guide",
+        "anti_ai_rules",
+        "rhythm_controls",
+        "hard_constraints",
+        "chapter_plan_rules",
+        "relationship_progression",
+        "originality_notes",
+        "novel_constitution",
+        "environment_bible",
+        "relationship_ledger",
+    )
+    result = {key: profile[key] for key in allowed if key in profile}
+    # Keep the active prompt compact; long research/profile artifacts are not
+    # chapter instructions and often turn into accidental writing formulas.
+    for key in ("anti_ai_rules", "rhythm_controls", "hard_constraints", "chapter_plan_rules", "relationship_progression"):
+        if isinstance(result.get(key), list):
+            result[key] = [str(item) for item in result[key][:8]]
+    return result
+
+
 def build_writer_context(
     *,
     bible: StoryBible,
@@ -237,6 +262,7 @@ def build_writer_context(
                 for scene in agent_plan.scenes
             ],
         })
+    writer_profile = _writer_creative_profile(creative_profile)
     return WriterContext(
         story_bible=story_bible_to_architect(bible),
         world_rules=rules,
@@ -252,18 +278,12 @@ def build_writer_context(
         forbidden_knowledge=forbidden_knowledge or {},
         previous_chapter_summary=previous_chapter_summary,
         language=language,
-        creative_profile=creative_profile or {},
+        creative_profile=writer_profile,
         chapter_word_min=chapter_word_min,
         chapter_word_max=chapter_word_max,
-        novel_constitution=(creative_profile or {}).get("novel_constitution", {})
-        if isinstance(creative_profile, dict)
-        else {},
-        environment_bible=(creative_profile or {}).get("environment_bible", {})
-        if isinstance(creative_profile, dict)
-        else {},
-        relationship_ledger=(creative_profile or {}).get("relationship_ledger", [])
-        if isinstance(creative_profile, dict)
-        else [],
+        novel_constitution=writer_profile.get("novel_constitution", {}),
+        environment_bible=writer_profile.get("environment_bible", {}),
+        relationship_ledger=writer_profile.get("relationship_ledger", []),
         story_state_ledger=story_state_ledger,
         creative_contract=creative_contract or {},
     )

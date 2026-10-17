@@ -11,6 +11,7 @@ from novel_engine.agents.contracts import (
     CommercialReviewInput,
     CommercialReviewOutput,
     ContinuityInput,
+    ContinuityFinding,
     ContinuityOutput,
     EditorInput,
     HookAgentInput,
@@ -30,7 +31,7 @@ from novel_engine.memory.models import (
     RetrievalRequest,
     TimelineMemory,
 )
-from novel_engine.memory.retrieval import RetrievalPipeline
+from novel_engine.memory.retrieval import RetrievalPipeline, retrieval_query_text
 from novel_engine.memory.handoff import build_chapter_handoff
 from novel_engine.memory.service import MemoryService
 from novel_engine.models.entities import Chapter, ChapterPlan, ChapterRevision, Foreshadowing, Hook, ScenePlan
@@ -66,6 +67,16 @@ from novel_engine.style.narrative_fingerprint import (
     NarrativeWarning,
     assess_narrative_repetition,
     record_narrative_plan,
+)
+from novel_engine.style.sequence_controls import (
+    SequenceWarning,
+    assess_expression_sequence,
+    assess_reveal_plan,
+    build_sequence_guidance,
+    fingerprint_chapter,
+    record_expression,
+    record_reveals,
+    reveal_items,
 )
 from novel_engine.style.completeness import escalate_verdict, scan_prose_completeness
 from novel_engine.style.memory_continuity import scan_scene_handoffs
@@ -123,6 +134,8 @@ class DraftResult(BaseModel):
     repetition_check: dict = Field(default_factory=dict)
     relevance_check: dict = Field(default_factory=dict)
     narrative_repetition: list[NarrativeWarning] = Field(default_factory=list)
+    scene_reviews: list[object] = Field(default_factory=list)
+    sequence_review: list[SequenceWarning] = Field(default_factory=list)
 
 
 class ChapterVersion(BaseModel):
@@ -353,8 +366,7 @@ class ChapterGenerationPipeline:
             )
         hooks = await self.engine.hooks.list(project_id, open_only=True)
         retrieval = RetrievalPipeline(self.memory.store, self.memory.embedder)
-        package = retrieval.retrieve(
-            RetrievalRequest(
+        retrieval_request = RetrievalRequest(
                 project_id=project_id,
                 chapter_number=chapter_number,
                 chapter_title=plan.chapter_title,
@@ -367,7 +379,8 @@ class ChapterGenerationPipeline:
                 conflict=plan.conflict,
                 active_hooks=[item.description for item in hooks],
             )
-        )
+        query_embedding = (await self.memory.embed_texts(retrieval_query_text(retrieval_request)))[0]
+        package = retrieval.retrieve(retrieval_request, query_embedding=query_embedding)
         notes = tuple(
             f"{item.category}: {item.item} (x{item.frequency})"
             for item in assess_repetition(
@@ -388,6 +401,12 @@ class ChapterGenerationPipeline:
             history=self.style_history.narrative,
         )
         notes = (*notes, *(f"{item.category}: recent narrative pattern (x{item.frequency})" for item in narrative_notes))
+        notes = (*notes, *build_sequence_guidance(
+            history=self.style_history.expression,
+            ledger=self.style_history.reveals,
+            plan=plan,
+            scenes=scenes,
+        ))
         previous_chapter = await self.engine.chapters.get_by_number(project_id, chapter_number - 1) if chapter_number > 1 else None
         previous_memory = self.memory.store.chapter(project_id, chapter_number - 1) if chapter_number > 1 else None
         writer_context = build_writer_context(
@@ -522,19 +541,57 @@ class ChapterGenerationPipeline:
         )
         alignment_findings = scan_context_alignment(prose=prose, context=loaded.writer_context)
         completeness_findings = scan_prose_completeness(prose)
+        initial_expression = fingerprint_chapter(
+            chapter_number=chapter_number,
+            prose=prose,
+            plan=loaded.plan,
+            scenes=loaded.scenes,
+            watchlist=loaded.style.platform.monitored_phrases,
+        )
+        initial_sequence_review = [
+            *assess_expression_sequence(initial_expression, self.style_history.expression),
+            *assess_reveal_plan(
+                plan=loaded.plan,
+                scenes=loaded.scenes,
+                ledger=self.style_history.reveals,
+                chapter_number=chapter_number,
+            ),
+        ]
+        sequence_findings = [
+            ContinuityFinding(
+                severity=ContinuityVerdict.WARNING,
+                category=item.category,
+                problem=item.note,
+                evidence=f"chapters: {', '.join(str(number) for number in item.chapters)}",
+                recommendation=item.recommendation,
+            )
+            for item in initial_sequence_review
+        ]
         continuity = ContinuityOutput(
             overall=escalate_verdict(bundle.continuity.output.overall, [
                 *bundle.continuity.output.findings,
+                *[
+                    finding
+                    for review in bundle.scene_reviews
+                    for finding in review.findings
+                ],
                 *signal_findings,
                 *alignment_findings,
                 *completeness_findings,
+                *sequence_findings,
                 *scan_commercial_quality(prose=prose, context=loaded.writer_context),
             ]),
             findings=[
                 *bundle.continuity.output.findings,
+                *[
+                    finding
+                    for review in bundle.scene_reviews
+                    for finding in review.findings
+                ],
                 *signal_findings,
                 *alignment_findings,
                 *completeness_findings,
+                *sequence_findings,
                 *scan_commercial_quality(prose=prose, context=loaded.writer_context),
             ],
         )
@@ -738,9 +795,34 @@ class ChapterGenerationPipeline:
             scenes=loaded.scenes,
             history=self.style_history.narrative,
         )
+        expression_fingerprint = fingerprint_chapter(
+            chapter_number=chapter_number,
+            prose=prose,
+            plan=loaded.plan,
+            scenes=loaded.scenes,
+            watchlist=loaded.style.platform.monitored_phrases,
+        )
+        sequence_review = [
+            *assess_expression_sequence(expression_fingerprint, self.style_history.expression),
+            *assess_reveal_plan(
+                plan=loaded.plan,
+                scenes=loaded.scenes,
+                ledger=self.style_history.reveals,
+                chapter_number=chapter_number,
+            ),
+        ]
 
         persisted = None
         if persist:
+            # Drafts contribute to expression/reveal history so the next draft
+            # can avoid repeating the same template. They do not enter canon
+            # memory until commit_approved_chapter succeeds.
+            record_expression(self.style_history.expression, expression_fingerprint)
+            record_reveals(
+                self.style_history.reveals,
+                chapter_number=chapter_number,
+                items=reveal_items(loaded.plan, loaded.scenes),
+            )
             persisted = await self.persist_revision(
                 project_id,
                 chapter_number,
@@ -769,6 +851,8 @@ class ChapterGenerationPipeline:
             repetition_check=repetition_check.model_dump(),
             relevance_check=relevance_check.model_dump(),
             narrative_repetition=narrative_repetition,
+            scene_reviews=bundle.scene_reviews,
+            sequence_review=sequence_review,
         )
 
     async def _review_candidate(self, *, loaded, bundle, prose):
@@ -1130,6 +1214,19 @@ class ChapterGenerationPipeline:
             cliffhanger=loaded.plan.cliffhanger,
             scenes=loaded.scenes,
         )
+        expression_fingerprint = fingerprint_chapter(
+            chapter_number=chapter_number,
+            prose=prose,
+            plan=loaded.plan,
+            scenes=loaded.scenes,
+            watchlist=loaded.style.platform.monitored_phrases,
+        )
+        record_expression(self.style_history.expression, expression_fingerprint)
+        record_reveals(
+            self.style_history.reveals,
+            chapter_number=chapter_number,
+            items=reveal_items(loaded.plan, loaded.scenes),
+        )
         approved = await self.engine.chapters.approve(
             project_id,
             chapter_number,
@@ -1137,6 +1234,7 @@ class ChapterGenerationPipeline:
             commit=False,
         )
         self.memory.store.set_story_state(next_state)
+        await self.memory.reembed_project(project_id)
         return CommitResult(
             chapter=approved,
             summary=summary,

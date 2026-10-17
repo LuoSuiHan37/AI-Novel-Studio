@@ -79,6 +79,9 @@ class InMemoryMemoryStore:
         self.vectors[record.project_id].append(record)
         return record
 
+    def replace_vectors(self, project_id: uuid.UUID, records: list[VectorRecord]) -> None:
+        self.vectors[project_id] = list(records)
+
     def vectors_for(self, project_id: uuid.UUID) -> list[VectorRecord]:
         return list(self.vectors[project_id])
 

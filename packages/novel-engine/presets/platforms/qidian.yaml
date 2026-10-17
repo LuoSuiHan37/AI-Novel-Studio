@@ -1,0 +1,33 @@
+id: qidian
+name: 起点中文网
+language: zh-CN
+audience: broad
+pacing: elastic_serial
+paragraph_style: short_chinese_paragraphs
+chapter_word_min: 2200
+chapter_word_max: 4000
+required_beats:
+  - concrete_scene_change
+  - character_choice
+  - plot_progress
+ending: causal_hook_or_resonant_end
+primary_genres:
+  - 古代言情
+  - 历史题材
+  - 宅斗
+  - 悬疑
+writing_rules:
+  - 使用自然简体中文，按语义分段。
+  - 让信息通过行动、物证和人物反应逐步出现。
+  - 结尾必须由本章因果产生，不突然添加无因由的大秘密。
+avoid:
+  - 人物连续正确且没有代价
+  - 连续章节重复同一种反转
+  - 人物替作者解释完整世界观
+monitored_phrases: []
+continuity_signals: []
+literary_requirements:
+  - 角色的选择必须产生可见后果。
+  - 对白应包含目的、隐瞒或试探，而不只是说明信息。
+environment_requirements:
+  - 反复出现的地点和物件必须随着关系变化产生新意义。

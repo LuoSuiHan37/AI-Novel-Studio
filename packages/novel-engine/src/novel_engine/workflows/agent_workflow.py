@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from novel_engine.agents.chapter_planner import ChapterPlannerAgent
 from novel_engine.agents.commercial import CommercialReviewAgent
@@ -20,8 +20,13 @@ from novel_engine.agents.contracts import (
     WorldAgentInput,
     WriterInput,
     ProjectReviewInput,
+    SceneReviewInput,
+    SceneDraft,
+    SceneReviewOutput,
 )
 from novel_engine.domain.errors import InvalidStateError
+from novel_engine.agents.base import AgentResult
+from novel_engine.providers.types import TokenUsage
 from novel_engine.style.word_count import count_text_units
 from novel_engine.agents.editor import EditorAgent
 from novel_engine.agents.hook import HookAgent
@@ -34,6 +39,7 @@ from novel_engine.agents.world import WorldAgent
 from novel_engine.agents.writer import WriterAgent
 from novel_engine.agents.project_review import ProjectReviewAgent
 from novel_engine.providers.base import LLMProvider
+from novel_engine.models.enums import ContinuityVerdict
 
 
 class ChapterPassBundle(BaseModel):
@@ -45,12 +51,14 @@ class ChapterPassBundle(BaseModel):
     memory: object
     hooks: object
     revision: object | None = None
+    scene_reviews: list[object] = Field(default_factory=list)
 
 
 class AgentWorkflow:
     """Schedules agents. Agents never invoke one another."""
 
     def __init__(self, provider: LLMProvider, *, role: str = "generation") -> None:
+        self.provider = provider
         self.role = role
         self.provider_identity = {
             "role": role,
@@ -98,6 +106,66 @@ class AgentWorkflow:
     async def review_project(self, payload: ProjectReviewInput):
         return await self.project_review.run(payload)
 
+    async def review_scene(self, payload: SceneReviewInput):
+        # Scene preflight is deliberately local and provider-free. The chapter
+        # editor/continuity agents already perform semantic review; adding a
+        # second LLM call for every scene would duplicate that work and break
+        # older providers that only implement the existing agent schemas.
+        from novel_engine.agents.contracts import ContinuityFinding
+        from novel_engine.style.word_count import count_text_units
+
+        findings: list[ContinuityFinding] = []
+        count = count_text_units(payload.prose)
+        minimum = payload.context.chapter_word_min
+        maximum = payload.context.chapter_word_max
+        if not payload.prose.strip():
+            findings.append(
+                ContinuityFinding(
+                    severity=ContinuityVerdict.ERROR,
+                    category="scene_empty",
+                    problem="scene prose is empty",
+                    evidence="no prose was generated",
+                    recommendation="regenerate the scene before assembling the chapter",
+                )
+            )
+        elif count > maximum:
+            findings.append(
+                ContinuityFinding(
+                    severity=ContinuityVerdict.ERROR,
+                    category="scene_length",
+                    problem=f"scene exceeds its budget ({count}>{maximum})",
+                    evidence=f"counted units: {count}",
+                    recommendation=f"compress repetition and keep the scene within {minimum}-{maximum}",
+                )
+            )
+        elif count < minimum:
+            findings.append(
+                ContinuityFinding(
+                    severity=ContinuityVerdict.WARNING,
+                    category="scene_length",
+                    problem=f"scene is below its budget ({count}<{minimum})",
+                    evidence=f"counted units: {count}",
+                    recommendation=f"add only planned action, pressure, consequence, or dialogue to reach {minimum}-{maximum}",
+                )
+            )
+        verdict = ContinuityVerdict.ERROR if any(
+            item.severity is ContinuityVerdict.ERROR for item in findings
+        ) else ContinuityVerdict.WARNING if findings else ContinuityVerdict.PASS
+        return AgentResult(
+            agent="scene_review",
+            prompt_id="scene_review",
+            prompt_version="1.0.0",
+            temperature=0.0,
+            output=SceneReviewOutput(
+                overall=verdict,
+                findings=findings,
+                transition_requirements=[
+                    f"carry forward scene {payload.scene.scene_number} ending into the next scene"
+                ],
+            ),
+            usage=TokenUsage(),
+        )
+
     async def draft_chapter_pass(self, payload: WriterInput) -> ChapterPassBundle:
         written = await self.writer.run(payload)
         if written.output.title != payload.context.chapter_plan.chapter_title:
@@ -134,12 +202,14 @@ class AgentWorkflow:
             continuity=continuity,
             memory=memory,
             hooks=hooks,
+            scene_reviews=[],
         )
 
     async def draft_chapter_by_scenes(self, payload: WriterInput) -> ChapterPassBundle:
         """Draft, validate, and assemble each planned scene under a hard budget."""
         scene_outputs = []
         scene_handoffs = []
+        scene_reviews = []
         previous_tail = ""
         first_written = None
         scenes = list(payload.context.chapter_plan.scenes)
@@ -210,6 +280,7 @@ class AgentWorkflow:
             written = None
             prose = ""
             count = 0
+            scene_review = None
             for attempt in range(3):
                 attempt_notes = notes
                 if attempt:
@@ -226,7 +297,19 @@ class AgentWorkflow:
                 # while making Chinese counted-character generation strict.
                 contains_cjk = any("\u3400" <= char <= "\u9fff" for char in prose)
                 if (not contains_cjk and count <= scene_max) or (contains_cjk and scene_min <= count <= scene_max):
-                    break
+                    scene_review = await self.review_scene(
+                        SceneReviewInput(
+                            context=scene_context,
+                            scene=SceneDraft.model_validate(scene.model_dump()),
+                            prose=prose,
+                            previous_scene_handoff=previous_tail,
+                        )
+                    )
+                    if scene_review.output.overall is not ContinuityVerdict.ERROR or attempt == 2:
+                        break
+                    notes += "\n场景审查未通过，请修复：" + "; ".join(
+                        item.recommendation for item in scene_review.output.findings
+                    )
             if written is None or not prose:
                 raise InvalidStateError(
                     f"场景 {scene.scene_number} 未生成有效正文，已停止组装本章"
@@ -242,6 +325,8 @@ class AgentWorkflow:
             if first_written is None:
                 first_written = written
             scene_outputs.append(prose)
+            if scene_review is not None:
+                scene_reviews.append(scene_review.output)
             # Extract the state transition immediately after each scene. The
             # next scene already receives the previous prose tail; this durable
             # handoff also makes the transition auditable after assembly.
@@ -300,4 +385,5 @@ class AgentWorkflow:
             continuity=continuity,
             memory=memory,
             hooks=hooks,
+            scene_reviews=scene_reviews,
         )

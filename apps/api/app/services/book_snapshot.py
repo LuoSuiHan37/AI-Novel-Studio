@@ -25,6 +25,23 @@ def _json(value: Any) -> Any:
     return value
 
 
+def _without_repeated_heading(content: str, title: str) -> str:
+    """Keep the snapshot-owned Markdown heading only once."""
+    lines = content.lstrip("\ufeff\r\n").splitlines()
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    if lines and lines[0].strip() in {f"# {title}".strip(), title.strip()}:
+        lines.pop(0)
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    if lines and (
+        lines[0].strip() == title.strip()
+        or re.match(rf"^第\d+章[：:\s]*{re.escape(title.strip())}$", lines[0].strip())
+    ):
+        lines.pop(0)
+    return "\n".join(lines).strip()
+
+
 async def save_project_snapshot(engine: NovelEngine, project_id: UUID) -> Path:
     """Mirror one complete book to the configured local save directory."""
     project = await engine.get_project(project_id)
@@ -54,7 +71,8 @@ async def save_project_snapshot(engine: NovelEngine, project_id: UUID) -> Path:
         title = _safe_segment(chapter.title or f"Chapter {chapter.chapter_number}")
         chapter_path = chapters_dir / f"{chapter.chapter_number:03d}-{title}.md"
         chapter_path.write_text(
-            "# " + (chapter.title or f"Chapter {chapter.chapter_number}") + "\n\n" + chapter.content,
+            "# " + (chapter.title or f"Chapter {chapter.chapter_number}") + "\n\n"
+            + _without_repeated_heading(chapter.content, chapter.title or f"Chapter {chapter.chapter_number}"),
             encoding="utf-8",
         )
 

@@ -29,8 +29,12 @@ system: |
   world rules, memory, or established cause and effect. Ignore missing, stale,
   ambiguous, or irrelevant tags silently. The confirmed story and chapter plan
   always outrank work_tags.
-  Obey context.creative_profile.hard_constraints and chapter_requirements when
-  present. Use prose_controls and anti_ai_rules as guidance, not as a formula.
+  Treat context.creative_profile.hard_constraints as a small set of must-not-break
+  constraints, and treat chapter_plan plus chapter_requirements as the current
+  chapter's task. When constraints overlap, prefer the chapter plan and choose
+  at most three active style requirements; do not turn every rule into a visible
+  beat. Use prose_controls, rhythm_controls, and anti_ai_rules as guidance, not
+  as a formula or checklist. Never reveal or use future-chapter planning data.
   Preserve subtext, distinct voices, and character choices that are not merely
   convenient for the plot.
   Do not change canon names, ranks, world rules, or prior facts.

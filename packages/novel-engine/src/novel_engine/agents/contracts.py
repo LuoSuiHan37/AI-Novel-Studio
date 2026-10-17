@@ -246,6 +246,13 @@ class WriterInput(AgentModel):
     human_notes: str | None = None
 
 
+class SceneReviewInput(AgentModel):
+    context: WriterContext
+    scene: SceneDraft
+    prose: str
+    previous_scene_handoff: str = ""
+
+
 class WriterOutput(AgentModel):
     title: str
     prose: str
@@ -345,6 +352,21 @@ class ContinuityOutput(AgentModel):
 
     @model_validator(mode="after")
     def _rollup(self) -> ContinuityOutput:
+        if any(item.severity is ContinuityVerdict.ERROR for item in self.findings):
+            self.overall = ContinuityVerdict.ERROR
+        elif any(item.severity is ContinuityVerdict.WARNING for item in self.findings):
+            if self.overall is ContinuityVerdict.PASS:
+                self.overall = ContinuityVerdict.WARNING
+        return self
+
+
+class SceneReviewOutput(AgentModel):
+    overall: ContinuityVerdict
+    findings: list[ContinuityFinding] = Field(default_factory=list)
+    transition_requirements: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _rollup(self) -> "SceneReviewOutput":
         if any(item.severity is ContinuityVerdict.ERROR for item in self.findings):
             self.overall = ContinuityVerdict.ERROR
         elif any(item.severity is ContinuityVerdict.WARNING for item in self.findings):

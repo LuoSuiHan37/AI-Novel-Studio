@@ -1,0 +1,33 @@
+id: qimao
+name: 七猫小说
+language: zh-CN
+audience: female
+pacing: fast_serial
+paragraph_style: short_chinese_paragraphs
+chapter_word_min: 2000
+chapter_word_max: 3500
+required_beats:
+  - concrete_scene_change
+  - character_choice
+  - relationship_or_conflict_change
+  - plot_progress
+ending: causal_hook_or_decision
+primary_genres:
+  - 都市言情
+  - 古代言情
+  - 豪门总裁
+writing_rules:
+  - 使用自然简体中文，按语义分段。
+  - 优先写行动、具体物件和潜台词，避免空泛总结。
+  - 结尾必须由本章行动产生下一步压力或决定。
+avoid:
+  - 连续使用相同的开场、结尾和悬念模式
+  - 人物替作者整段解释背景
+  - 重复心理和重复环境描写
+monitored_phrases: []
+continuity_signals: []
+literary_requirements:
+  - 情绪通过行动、细节和潜台词呈现。
+  - 每场戏至少改变信息、关系、处境或选择成本中的一项。
+environment_requirements:
+  - 主要地点必须有具体感官细节和现实限制。

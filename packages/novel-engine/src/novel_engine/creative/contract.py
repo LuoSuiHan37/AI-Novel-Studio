@@ -56,6 +56,26 @@ _GENRE_PRESETS: dict[str, dict[str, Any]] = {
         "relationship_engine": "相遇、试探、误会、确认与选择",
         "conflict_engine": "现实阻力与情感需求持续碰撞",
     },
+    "palace_house": {
+        "genre_label": "古代宅斗",
+        "subgenres": ["古代言情", "家宅权力", "旧案翻查"],
+        "required_elements": ["家宅或宗族权力", "核心关系", "利益或名分冲突", "具体证据或行动"],
+        "forbidden_drift": ["无因由的连续反转", "只靠解释推进", "脱离家宅因果的空泛朝堂线"],
+        "title_signals": ["侯府", "中馈", "账", "族老", "婚书", "世子", "旧案"],
+        "tone": "克制、锋利、利益与情感交织",
+        "relationship_engine": "试探、合作、边界谈判、信任与代价",
+        "conflict_engine": "中馈、婆媳、族权和旧案逐层升级",
+    },
+    "historical_romance": {
+        "genre_label": "古代言情",
+        "subgenres": ["家宅", "权谋", "情感成长"],
+        "required_elements": ["时代与身份约束", "核心关系", "现实利益冲突"],
+        "forbidden_drift": ["现代口吻破坏时代感", "无因由的万能反转", "脱离人物能力的解决方案"],
+        "title_signals": ["婚书", "侯府", "世子", "王府", "旧案", "圣旨"],
+        "tone": "具体、克制、因果清晰",
+        "relationship_engine": "试探、协作、误解、选择与承诺",
+        "conflict_engine": "身份、家族、制度和情感持续碰撞",
+    },
 }
 
 

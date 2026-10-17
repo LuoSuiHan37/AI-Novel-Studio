@@ -1,0 +1,15 @@
+id: billionaire_romance
+name: 豪门总裁
+genres:
+  - 豪门总裁
+  - 都市言情
+default_platform: qimao
+tropes:
+  - 契约婚姻
+  - 家族秘密
+  - 身份与利益冲突
+writing_rules:
+  - 关系推进必须通过选择、信任和代价发生，不能只靠保护或暧昧台词。
+  - 男主不能连续章节都承担救场和信息掌控功能。
+  - 外部威胁、商业冲突和感情冲突要轮换，不连续重复同一种压力。
+continuity_signals: []

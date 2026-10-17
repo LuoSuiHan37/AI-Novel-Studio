@@ -6,6 +6,7 @@ from collections import defaultdict
 from pydantic import BaseModel, ConfigDict, Field
 
 from novel_engine.style.narrative_fingerprint import NarrativeHistory
+from novel_engine.style.sequence_controls import ExpressionHistory, RevealLedger
 
 _TOKEN = re.compile(r"[a-z']+|[\u3400-\u9fff]")
 _QUOTED = re.compile(r'"([^"]{8,80})"')
@@ -32,6 +33,8 @@ class StyleHistory(BaseModel):
     conflicts: dict[str, list[int]] = Field(default_factory=lambda: defaultdict(list))
     dialogue_patterns: dict[str, list[int]] = Field(default_factory=lambda: defaultdict(list))
     narrative: NarrativeHistory = Field(default_factory=NarrativeHistory)
+    expression: ExpressionHistory = Field(default_factory=ExpressionHistory)
+    reveals: RevealLedger = Field(default_factory=RevealLedger)
 
     def model_post_init(self, _context) -> None:
         self.phrases = defaultdict(list, self.phrases)

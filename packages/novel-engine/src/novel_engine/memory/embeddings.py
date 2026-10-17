@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+from collections.abc import Sequence
+from typing import Protocol
 
 _TOKEN_RE = re.compile(r"[a-z0-9']+")
 VECTOR_DIM = 256
@@ -28,6 +30,21 @@ class LexicalEmbedder:
         for token in tokenize(text):
             vector[_bucket(token, self.dimensions)] += 1.0
         return l2_normalize(vector)
+
+
+class AsyncEmbedder(Protocol):
+    async def embed(self, texts: str | Sequence[str]) -> list[list[float]]: ...
+
+
+class ProviderEmbedder:
+    """Adapt the async LLM provider embedding port to the memory layer."""
+
+    def __init__(self, provider) -> None:
+        self.provider = provider
+
+    async def embed(self, texts: str | Sequence[str]) -> list[list[float]]:
+        result = await self.provider.embed(texts)
+        return result.embeddings
 
 
 def l2_normalize(vector: list[float]) -> list[float]:

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import uuid
 
-from novel_engine.memory.embeddings import LexicalEmbedder
+from collections.abc import Sequence
+
+from novel_engine.memory.embeddings import AsyncEmbedder, LexicalEmbedder
 from novel_engine.memory.models import (
     ChapterMemory,
     CharacterMemory,
@@ -15,12 +17,65 @@ from novel_engine.memory.models import (
 from novel_engine.memory.store import InMemoryMemoryStore
 from novel_engine.memory.write_policy import apply_write_policy
 from novel_engine.models.enums import EpistemicStatus, MemoryLayer, MemoryType
+from novel_engine.providers.errors import ProviderError
 
 
 class MemoryService:
-    def __init__(self, store: InMemoryMemoryStore | None = None, embedder: LexicalEmbedder | None = None) -> None:
+    def __init__(
+        self,
+        store: InMemoryMemoryStore | None = None,
+        embedder: LexicalEmbedder | None = None,
+        async_embedder: AsyncEmbedder | None = None,
+    ) -> None:
         self.store = store or InMemoryMemoryStore()
         self.embedder = embedder or LexicalEmbedder()
+        self.async_embedder = async_embedder
+
+    async def embed_texts(self, texts: str | Sequence[str]) -> list[list[float]]:
+        """Use the configured provider when available, lexical fallback otherwise."""
+        inputs = [texts] if isinstance(texts, str) else list(texts)
+        if not inputs:
+            return []
+        if self.async_embedder is not None:
+            try:
+                return await self.async_embedder.embed(inputs)
+            except (ProviderError, AssertionError):
+                # Embeddings improve retrieval but are not allowed to make a
+                # chapter impossible to draft when a provider exposes chat
+                # but not its embeddings endpoint (common for test doubles
+                # and some OpenAI-compatible gateways).
+                pass
+        return [self.embedder.embed(item) for item in inputs]
+
+    async def reembed_project(self, project_id: uuid.UUID) -> None:
+        """Refresh in-memory vectors after a project has been hydrated or committed."""
+        records = self.store.records_for(project_id)
+        if not records:
+            return
+        embeddings = await self.embed_texts([item.content for item in records])
+        vectors = []
+        for record, embedding in zip(records, embeddings, strict=True):
+            vectors.append(
+                VectorRecord(
+                    id=record.id,
+                    project_id=project_id,
+                    layer=MemoryLayer.VECTOR,
+                    epistemic_status=record.epistemic_status,
+                    memory_type=record.memory_type,
+                    importance=record.importance,
+                    content=record.content,
+                    chapter_number=record.chapter_number,
+                    character_name=record.character_name,
+                    location=record.location,
+                    known_by=list(record.known_by),
+                    unknown_to=list(record.unknown_to),
+                    tags=list(record.tags),
+                    source=record.source,
+                    confirmed_by=record.confirmed_by,
+                    embedding=embedding,
+                )
+            )
+        self.store.replace_vectors(project_id, vectors)
 
     def set_global(
         self,
