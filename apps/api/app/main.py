@@ -7,11 +7,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse
 
 from app.api.errors import (
     domain_error_handler,
+    database_error_handler,
     http_exception_handler,
     provider_error_handler,
     validation_error_handler,
@@ -99,6 +101,9 @@ def create_app() -> FastAPI:
         return response
 
     application.add_exception_handler(DomainError, domain_error_handler)
+    application.add_exception_handler(TimeoutError, database_error_handler)
+    application.add_exception_handler(OSError, database_error_handler)
+    application.add_exception_handler(SQLAlchemyError, database_error_handler)
     application.add_exception_handler(ProviderError, provider_error_handler)
     application.add_exception_handler(StarletteHTTPException, http_exception_handler)
     application.add_exception_handler(RequestValidationError, validation_error_handler)

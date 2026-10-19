@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from novel_engine.domain.errors import (
@@ -101,4 +102,16 @@ async def provider_error_handler(request: Request, exc: ProviderError) -> JSONRe
         message,
         request_id,
         422,
+    )
+
+
+async def database_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Keep an unavailable database from turning into an opaque 500 traceback."""
+    if not isinstance(exc, (SQLAlchemyError, TimeoutError, OSError)):
+        raise exc
+    return error_payload(
+        "database_unavailable",
+        "数据库暂时不可用，请确认 PostgreSQL 已启动后重试。",
+        _request_id(request),
+        503,
     )

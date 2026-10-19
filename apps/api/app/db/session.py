@@ -14,7 +14,10 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 def get_engine(settings: Settings) -> AsyncEngine:
     global _engine
     if _engine is None:
-        kwargs: dict = {"pool_pre_ping": True}
+        kwargs: dict = {
+            "pool_pre_ping": True,
+            "connect_args": {"timeout": settings.database_connect_timeout},
+        }
         if settings.app_env != "production":
             kwargs["poolclass"] = NullPool
         _engine = create_async_engine(settings.database_url, **kwargs)

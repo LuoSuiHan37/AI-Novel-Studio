@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+asyncpg://novel:novel@localhost:5433/ai_novel_studio"
     )
+    database_connect_timeout: float = 10.0
     save_root: str = str(_REPO_ROOT / "save")
 
     llm_provider: str = "deepseek"
