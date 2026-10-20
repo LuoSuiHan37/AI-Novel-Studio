@@ -39,6 +39,10 @@ class NovelProject(DomainModel):
     genre: str = "werewolf_romance"
     tropes: list[str] = Field(default_factory=list)
     target_platform: str | None = None
+    platform_book_id: str | None = None
+    platform_book_title: str | None = None
+    auto_publish_enabled: bool = False
+    completed: bool = False
     language: str = "en"
     chapter_count_target: int | None = Field(default=None, ge=1)
     status: ProjectStatus = ProjectStatus.PLANNING

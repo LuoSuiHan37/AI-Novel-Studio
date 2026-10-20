@@ -1,6 +1,7 @@
 import logging
 import hmac
 import uuid
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -20,6 +21,7 @@ from app.api.errors import (
 )
 from app.api.routes import (
     arcs_router,
+    automation_router,
     chapters_router,
     characters_router,
     health_router,
@@ -34,6 +36,7 @@ from app.api.routes import (
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.db.session import engine_lifespan
+from app.api.routes.automation import _recover_queued_tasks, start_automation_scheduler
 from novel_engine.domain.errors import DomainError
 from novel_engine.providers.errors import ProviderError
 
@@ -47,7 +50,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         raise RuntimeError("API_AUTH_TOKEN must be configured in production")
     setup_logging(settings.log_level)
     async with engine_lifespan(settings):
-        yield
+        # Recover persisted work before serving requests.  This makes a task
+        # created before an API restart resume deterministically instead of
+        # depending on a background tick that may be delayed or hidden.
+        await _recover_queued_tasks()
+        scheduler = start_automation_scheduler()
+        try:
+            yield
+        finally:
+            scheduler.cancel()
+            await asyncio.gather(scheduler, return_exceptions=True)
 
 
 def create_app() -> FastAPI:
@@ -118,6 +130,7 @@ def create_app() -> FastAPI:
     application.include_router(arcs_router)
     application.include_router(chapters_router)
     application.include_router(memory_router)
+    application.include_router(automation_router)
     application.include_router(settings_router)
     return application
 

@@ -13,6 +13,7 @@ from app.db.models.llm import LLMConfig
 from app.db.models.memory import StoryMemory, TimelineEvent
 from app.db.models.plot import MasterPlot, StoryArc
 from app.db.models.project import NovelProject
+from app.db.models.automation import AutomationDailyQuota, AutomationNotification, AutomationSchedule, AutomationTask, PublishTask
 
 __all__ = [
     "Chapter",
@@ -35,5 +36,10 @@ __all__ = [
     "TimelineEvent",
     "WorldBible",
     "WorldRule",
+    "AutomationTask",
+    "PublishTask",
+    "AutomationDailyQuota",
+    "AutomationSchedule",
+    "AutomationNotification",
     "restore_chapter_revision",
 ]

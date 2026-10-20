@@ -9,7 +9,10 @@ if (-not (Test-Path -LiteralPath $python)) {
 
 Push-Location $apiRoot
 try {
-    & $python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+    # Use one stable process. --reload creates a watcher and a child server;
+    # repeated starts can leave multiple listeners on port 8000 and route
+    # requests to an older process.
+    & $python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }

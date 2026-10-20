@@ -41,6 +41,10 @@ class ProjectCreate(ApiModel):
     genre: str = "werewolf_romance"
     tropes: list[str] = Field(default_factory=list)
     target_platform: str | None = "alphanovel"
+    platform_book_id: str | None = None
+    platform_book_title: str | None = None
+    auto_publish_enabled: bool | None = None
+    completed: bool | None = None
     language: str = "en"
     chapter_count_target: int | None = Field(default=120, ge=1, le=5000)
     premise: str | None = None
@@ -83,6 +87,10 @@ class ProjectUpdate(BaseModel):
     genre: str | None = None
     tropes: list[str] | None = None
     target_platform: str | None = None
+    platform_book_id: str | None = None
+    platform_book_title: str | None = None
+    auto_publish_enabled: bool | None = None
+    completed: bool | None = None
     language: str | None = None
     chapter_count_target: int | None = Field(default=None, ge=1, le=5000)
     status: ProjectStatus | None = None
@@ -92,6 +100,11 @@ class ProjectUpdate(BaseModel):
     logline: str | None = None
     synopsis: str | None = None
     creative_profile: dict | None = None
+
+
+class PlatformBindingBody(ApiModel):
+    platform_book_id: str = Field(min_length=1, max_length=255)
+    platform_book_title: str | None = Field(default=None, max_length=255)
 
 
 class ChapterQualityFeedback(ApiModel):
@@ -324,6 +337,19 @@ class GenerateBody(ApiModel):
     persist: bool = False
     generate_scenes: bool = False
     overwrite_human: bool = False
+
+
+class AutoNextChapterBody(ApiModel):
+    """One-click chapter production settings.
+
+    The endpoint still uses the normal plan, review and commit gates.  It only
+    removes the repetitive UI orchestration between them.
+    """
+
+    max_attempts: int = Field(default=2, ge=1, le=4)
+    target_chapter_number: int | None = Field(default=None, ge=1)
+    human_notes: str | None = None
+    auto_approve: bool = True
 
 
 class ProposeEditBody(ApiModel):

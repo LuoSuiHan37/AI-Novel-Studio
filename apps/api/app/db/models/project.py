@@ -29,6 +29,10 @@ class NovelProject(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     genre: Mapped[str] = mapped_column(String(128), nullable=False, default="werewolf_romance")
     tropes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     target_platform: Mapped[str | None] = mapped_column(String(64))
+    platform_book_id: Mapped[str | None] = mapped_column(String(255))
+    platform_book_title: Mapped[str | None] = mapped_column(String(255))
+    auto_publish_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    completed: Mapped[bool] = mapped_column(nullable=False, default=False)
     language: Mapped[str] = mapped_column(String(16), nullable=False, default="en")
     logline: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(

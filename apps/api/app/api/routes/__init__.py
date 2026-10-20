@@ -9,6 +9,7 @@ from app.api.routes.projects import router as projects_router
 from app.api.routes.settings import router as settings_router
 from app.api.routes.story import router as story_router
 from app.api.routes.world import router as world_router
+from app.api.routes.automation import router as automation_router
 
 __all__ = [
     "arcs_router",
@@ -22,4 +23,5 @@ __all__ = [
     "settings_router",
     "story_router",
     "world_router",
+    "automation_router",
 ]

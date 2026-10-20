@@ -24,6 +24,14 @@ def resolve_api_key(settings: Settings, provider: LLMProviderName, env_name: str
     return mapping.get(provider, "")
 
 
+def resolve_row_api_key(settings: Settings, row: LLMConfig | None) -> str:
+    if row is None:
+        return ""
+    if row.api_key:
+        return row.api_key
+    return resolve_api_key(settings, LLMProviderName(row.provider), row.api_key_env_name)
+
+
 def resolve_base_url(settings: Settings, provider: LLMProviderName) -> str | None:
     if settings.llm_base_url:
         return settings.llm_base_url
@@ -80,7 +88,7 @@ def provider_config_from_settings(
         return ProviderConfig(
             provider=provider,
             model=row.model,
-            api_key=_secret(resolve_api_key(settings, provider, row.api_key_env_name)),
+            api_key=_secret(resolve_row_api_key(settings, row)),
             base_url=row.base_url or resolve_base_url(settings, provider),
             temperature=row.temperature,
             max_tokens=row.max_tokens,

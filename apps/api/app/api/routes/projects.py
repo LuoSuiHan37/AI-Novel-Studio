@@ -197,6 +197,10 @@ async def create_project(
             genre=body.genre,
             tropes=body.tropes,
             target_platform=_normalize_target_platform(body.language, body.target_platform) or "alphanovel",
+            platform_book_id=body.platform_book_id,
+            platform_book_title=body.platform_book_title,
+            auto_publish_enabled=bool(body.auto_publish_enabled),
+            completed=bool(body.completed),
             language=body.language,
             chapter_count_target=body.chapter_count_target,
             extra_metadata={

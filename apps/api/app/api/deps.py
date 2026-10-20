@@ -85,6 +85,12 @@ async def get_llm_provider(
             .where(LLMConfig.project_id == project_id)
             .order_by(LLMConfig.is_default.desc())
         )
+    if row is None:
+        row = await session.scalar(
+            select(LLMConfig)
+            .where(LLMConfig.project_id.is_(None))
+            .order_by(LLMConfig.is_default.desc())
+        )
     config = provider_config_from_settings(settings, row=row)
     updates: dict = {}
     if x_llm_provider:
@@ -124,6 +130,12 @@ async def get_optional_llm_provider(
         row = await session.scalar(
             select(LLMConfig)
             .where(LLMConfig.project_id == project_id)
+            .order_by(LLMConfig.is_default.desc())
+        )
+    if row is None:
+        row = await session.scalar(
+            select(LLMConfig)
+            .where(LLMConfig.project_id.is_(None))
             .order_by(LLMConfig.is_default.desc())
         )
     config = provider_config_from_settings(settings, row=row)

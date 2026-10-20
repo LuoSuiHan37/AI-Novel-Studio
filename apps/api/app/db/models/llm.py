@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, String, text
+from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -48,6 +48,9 @@ class LLMConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     base_url: Mapped[str | None] = mapped_column(String(512))
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     api_key_env_name: Mapped[str | None] = mapped_column(String(128))
+    # Local deployments need a durable credential for background automation.
+    # It is never returned by the settings API.
+    api_key: Mapped[str | None] = mapped_column(Text)
     temperature: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
     max_tokens: Mapped[int | None] = mapped_column(Integer)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

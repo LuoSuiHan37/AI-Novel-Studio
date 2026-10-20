@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_engine, get_llm_provider
+from app.api.deps import get_db, get_engine, get_llm_provider
+from app.api.routes.automation import _recover_queued_tasks
 from app.api.schemas import LLMSettingsOut, LLMSettingsPatch
 from app.db.models.llm import LLMConfig
 from novel_engine.domain.errors import NotFoundError
@@ -86,6 +87,35 @@ async def patch_llm_settings(
     await session.commit()
     await session.refresh(row)
     return _out(row)
+
+
+@router.patch("/settings/llm")
+async def patch_global_llm_settings(
+    body: dict,
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, str | bool | None]:
+    """Persist the global model connection for background automation."""
+    name = str(body.get("name") or "global-generation")
+    row = await session.scalar(
+        select(LLMConfig).where(LLMConfig.project_id.is_(None), LLMConfig.name == name)
+    )
+    if row is None:
+        row = LLMConfig(
+            project_id=None,
+            name=name,
+            provider=str(body.get("provider") or "deepseek"),
+            model=str(body.get("model") or "deepseek-chat"),
+            is_default=True,
+        )
+        session.add(row)
+    row.provider = str(body.get("provider") or row.provider)
+    row.model = str(body.get("model") or row.model)
+    row.base_url = str(body.get("base_url") or "") or None
+    row.api_key = str(body.get("api_key") or "") or row.api_key
+    row.is_default = True
+    await session.commit()
+    await _recover_queued_tasks(retry_provider_failures=True)
+    return {"status": "saved", "provider": row.provider, "model": row.model, "api_key_configured": bool(row.api_key)}
 
 
 def _session(engine: NovelEngine) -> AsyncSession:

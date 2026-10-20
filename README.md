@@ -111,6 +111,36 @@ python -m pytest
 
 前端验证：`cd apps/web && npm run build`，或 `npm run dev` 后走完创建项目 → Story Bible → 角色/世界/情节 → 章节计划 → 编辑器（预览后再 Apply/Save）。
 
+## 自动连载流水线
+
+章节目录中的“生成下一章”会自动计算下一章序号，生成并批准章节计划，生成正文，执行审核，并在审核未通过时自动重试（默认最多 2 次）。每次自动操作会写入 `automation_tasks`，可通过 `GET /projects/{project_id}/automation/tasks` 查看。
+
+项目自动连载固定每 20 分钟处理一章，每天最多正式发布 4 章；调度器随 API 服务启动运行。系统优先上传本地已有但尚未发布的章节，没有可上传章节时才生成下一章。章节平台发布使用 `POST /projects/{project_id}/chapters/{number}/publish/draft`，平台严格读取作品的 `target_platform` 标记，只创建该平台的一条任务；在接入官方授权适配器前，任务会保持 `not_configured`，不会虚报上传成功。
+
+每个作品需要先通过 `PUT /projects/{project_id}/automation/platform-binding` 绑定目标平台书籍 ID。发布任务会保存本地章节号、平台书籍 ID、平台章节号、平台章节标题和正文指纹；章节号返回不一致、书籍绑定变化或重复任务都会被阻止。
+
+需要异步排队时调用 `POST /projects/{project_id}/automation/enqueue-next`；接口立即返回 `queued`，后台任务会更新为 `running`、`completed`、`needs_human_review` 或 `failed`。
+
+异常记录可通过 `GET /projects/{project_id}/automation/notifications` 查看并用对应的 `/read` 接口标记；平台任务只有进入 `draft_uploaded` 或 `awaiting_confirmation` 后才能通过 `/automation/publish-tasks/{task_id}/confirm` 进入 `confirmed`，不会绕过平台上传结果直接标记为已发布。
+
+自动正式发布可在自动连载一级页面单独开启。开启后，调度器会按作品的目标章节数和 `target_platform` 标记优先上传本地未发布章节，没有可上传章节时再生成下一章、执行独立审核、上传并正式发布；关闭时仍保留“生成后人工确认发布”流程。每个作品和目标平台按北京时间每天最多正式发布 4 章，达到上限后当天停止，次日自动恢复。只有正式发布成功才会消耗额度。
+
+平台发布时统一传递 `use_ai=true` 和 `contains_ai=true`。浏览器适配器会在平台出现“是否使用 AI”“包含 AI”等确认项时选择“是”；如果页面无法确认该选项，任务会失败并保留异常通知，不会伪造发布成功。每个发布任务必须同时匹配本地项目、章节号和平台书籍 ID，并保存平台章节 ID/章节号与正文指纹，防止重复发布或发错作品。
+
+平台适配器采用显式配置：`*_PUBLISHER_ENABLED=true`、`*_PUBLISH_DRAFT_URL`、`*_PUBLISH_URL` 和 `*_PUBLISH_TOKEN`。草稿接口和正式发布接口接收 JSON `{title, chapter_number, content, mode}`，返回 JSON 中应包含 `id`/`chapter_id`，或 `{accepted: true}`。不同平台的官方字段差异应在适配器边界内转换，不要把平台页面地址直接当成 API 地址。
+
+没有开放 API 的平台可使用浏览器/CDP 适配器：配置 `*_BROWSER_ENABLED=true`、`*_CDP_URL`、`*_AUTHOR_URL` 和选择器 JSON。浏览器必须由用户手动登录；系统只复用现有会话，不自动输入密码、处理二维码或绕过验证码。首次接入应先使用草稿模式验证页面选择器，再开启正式发布。
+
+Windows 下若要让后端复用登录会话，需要用远程调试端口启动一个专用 Chrome 实例（不要直接复用日常 Chrome 配置目录）：
+
+```powershell
+& "$env:ProgramFiles\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="$pwd\.chrome-author-session"
+```
+
+在这个专用实例中分别登录三个作者中心，并把对应作者中心地址与选择器写入 `.env`。普通已打开的 Chrome 标签页不会自动暴露给后端；应用检测不到 `127.0.0.1:9222` 时会保持平台任务为 `not_configured`，避免误报上传成功。
+
+数据库升级：`alembic upgrade head`。自动化相关迁移包括 `0007_automation_pipeline`、`0008_platform_chapter_mapping`、`0009_auto_publish_quota`、`0010_quota_timestamps` 和 `0011_fixed_automation_interval`。
+
 ## 仓库结构
 
 ```

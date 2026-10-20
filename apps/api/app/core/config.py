@@ -66,6 +66,31 @@ class Settings(BaseSettings):
     review_base_url: str = ""
     review_api_key: str = ""
 
+    fanqie_publish_draft_url: str = ""
+    fanqie_publish_url: str = ""
+    fanqie_publish_token: str = ""
+    fanqie_publisher_enabled: bool = False
+    qidian_publish_draft_url: str = ""
+    qidian_publish_url: str = ""
+    qidian_publish_token: str = ""
+    qidian_publisher_enabled: bool = False
+    qimao_publish_draft_url: str = ""
+    qimao_publish_url: str = ""
+    qimao_publish_token: str = ""
+    qimao_publisher_enabled: bool = False
+    fanqie_browser_enabled: bool = False
+    fanqie_cdp_url: str = "http://127.0.0.1:9222"
+    fanqie_author_url: str = ""
+    fanqie_browser_selectors: dict = {}
+    qidian_browser_enabled: bool = False
+    qidian_cdp_url: str = "http://127.0.0.1:9222"
+    qidian_author_url: str = ""
+    qidian_browser_selectors: dict = {}
+    qimao_browser_enabled: bool = False
+    qimao_cdp_url: str = "http://127.0.0.1:9222"
+    qimao_author_url: str = ""
+    qimao_browser_selectors: dict = {}
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]

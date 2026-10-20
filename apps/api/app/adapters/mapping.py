@@ -65,6 +65,10 @@ def project_to_domain(row: ProjectRow) -> NovelProject:
         genre=row.genre,
         tropes=list(row.tropes or []),
         target_platform=row.target_platform,
+        platform_book_id=row.platform_book_id,
+        platform_book_title=row.platform_book_title,
+        auto_publish_enabled=row.auto_publish_enabled,
+        completed=row.completed,
         language=row.language or "en",
         chapter_count_target=row.chapter_count_target,
         status=_enum(row.status, ProjectStatus, ProjectStatus.PLANNING),
@@ -80,6 +84,10 @@ def apply_project(row: ProjectRow, project: NovelProject) -> None:
     row.genre = project.genre
     row.tropes = list(project.tropes)
     row.target_platform = project.target_platform
+    row.platform_book_id = project.platform_book_id
+    row.platform_book_title = project.platform_book_title
+    row.auto_publish_enabled = project.auto_publish_enabled
+    row.completed = project.completed
     row.language = project.language
     row.chapter_count_target = project.chapter_count_target
     row.status = project.status.value

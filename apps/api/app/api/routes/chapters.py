@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from difflib import SequenceMatcher
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
@@ -29,11 +30,14 @@ from app.api.deps import (
     get_review_workflow,
     get_workflow,
 )
-from app.api.schemas import ChapterPatch, ChapterPlanCreate, ChapterPlanSuggest, ConfirmBody, GenerateBody, ProposeEditBody
+from app.api.schemas import AutoNextChapterBody, ChapterPatch, ChapterPlanCreate, ChapterPlanSuggest, ConfirmBody, GenerateBody, ProposeEditBody
 from app.services.book_snapshot import save_project_snapshot
 from app.services.creative_quality import rank_creative_candidates
 from app.services.prompt_optimization import chapter_optimization_signals
+from app.services.platform_publishers import get_platform_publisher
+from app.core.config import get_settings
 from app.db.models.chapter import ChapterSummary
+from app.db.models.automation import AutomationTask, PublishTask
 from app.db.models.memory import StoryMemory, TimelineEvent
 from app.db.models.continuity import ContinuityIssue
 from novel_engine.agents.contracts import (
@@ -48,7 +52,7 @@ from novel_engine.agents.contracts import (
     MemoryAgentInput,
     WriterInput,
 )
-from novel_engine.domain.errors import InvalidStateError
+from novel_engine.domain.errors import InvalidStateError, NotFoundError
 from novel_engine.memory.embeddings import ProviderEmbedder
 from novel_engine.memory.service import MemoryService
 from novel_engine.models.entities import ChapterPlan, Hook, ScenePlan
@@ -79,6 +83,34 @@ from novel_engine.agents.contracts import ChapterPlannerInput, ContinuityInput, 
 from novel_engine.workflows.context import character_to_agent, plot_to_outline, story_bible_to_architect
 
 router = APIRouter(tags=["chapters"])
+
+
+def _title_key(value: str) -> str:
+    return "".join(value.split()).casefold()
+
+
+async def _ensure_unique_chapter_title(
+    project_id: UUID,
+    chapter_number: int,
+    title: str,
+    engine: NovelEngine,
+) -> str:
+    chapters = await engine.chapters.list(project_id)
+    existing_keys = {
+        _title_key(item.title)
+        for item in chapters
+        if item.chapter_number != chapter_number and _title_key(item.title)
+    }
+    if _title_key(title) not in existing_keys:
+        return title
+
+    base = title.strip()
+    candidate = f"{base}（第{chapter_number}章）"
+    suffix = 2
+    while _title_key(candidate) in existing_keys:
+        candidate = f"{base}（第{chapter_number}章·{suffix}）"
+        suffix += 1
+    return candidate
 
 
 async def _sync_project_writing_status(engine: NovelEngine, project_id: UUID) -> None:
@@ -638,9 +670,18 @@ async def suggest_chapter_title(
         [result.title, *result.candidates],
         existing=[item.title for item in chapters],
     )
-    title = ranked[0]["text"] if ranked else result.title.strip().strip("\"'“”‘’")
-    if not title:
-        raise InvalidStateError("the model returned an empty chapter title")
+    if not ranked:
+        fallback = result.title.strip().strip("\"'“”‘’")
+        if not fallback:
+            raise InvalidStateError("the model returned an empty chapter title")
+        fallback = await _ensure_unique_chapter_title(
+            project_id,
+            next_number,
+            fallback,
+            engine,
+        )
+        ranked = [{"text": fallback, "score": 0, "reasons": ["已自动追加章节号避免重复"]}]
+    title = ranked[0]["text"]
     return {"title": title, "candidates": ranked}
 
 
@@ -652,11 +693,17 @@ async def create_chapter_plan(
 ) -> dict:
     if not body.scenes:
         raise InvalidStateError("chapter plan must contain at least one scene")
+    unique_title = await _ensure_unique_chapter_title(
+        project_id,
+        body.chapter_number,
+        body.chapter_title,
+        engine,
+    )
     plan = await engine.chapter_plans.create(
         ChapterPlan(
             project_id=project_id,
             chapter_number=body.chapter_number,
-            chapter_title=body.chapter_title,
+            chapter_title=unique_title,
             pov=body.pov,
             location=body.location,
             characters=body.characters,
@@ -782,8 +829,15 @@ async def suggest_chapter_plan(
     )
     if not proposal.output.scenes or not proposal.output.characters:
         raise InvalidStateError("AI 章节计划必须包含角色和至少一个场景，请重试或完善角色设定")
+    unique_title = await _ensure_unique_chapter_title(
+        project_id,
+        body.chapter_number,
+        proposal.output.chapter_title,
+        engine,
+    )
+    proposal_output = proposal.output.model_copy(update={"chapter_title": unique_title})
     return _apply_chapter_budgets(
-        proposal.output,
+        proposal_output,
         minimum=style.platform.chapter_word_min,
         maximum=style.platform.chapter_word_max,
     )
@@ -937,6 +991,213 @@ async def generate_chapter(
         "auto_approved": auto_approved,
         "advances_next_chapter": False,
     }
+
+
+@router.post("/projects/{project_id}/chapters/auto-next")
+async def auto_generate_next_chapter(
+    project_id: UUID,
+    body: AutoNextChapterBody,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+    workflow: Annotated[AgentWorkflow, Depends(get_workflow)],
+    actor: Annotated[Actor, Depends(get_actor)],
+    review_workflow: Annotated[AgentWorkflow | None, Depends(get_review_workflow)],
+) -> dict:
+    """Generate the next chapter through the existing audited pipeline.
+
+    This is intentionally synchronous for the first automation milestone: the
+    caller gets a complete result and can safely refresh without guessing
+    whether a background task is still running.  The persisted audit metadata
+    makes this endpoint safe to promote to a durable queue later.
+    """
+    chapters = await engine.chapters.list(project_id)
+    next_number = body.target_chapter_number or (max((item.chapter_number for item in chapters), default=0) + 1)
+    try:
+        existing = await engine.chapters.get_by_number(project_id, next_number)
+    except NotFoundError:
+        # The next chapter is expected not to exist yet. The chapter-plan
+        # service creates the empty chapter slot before generation.
+        existing = None
+    if existing is not None and existing.content.strip():
+        raise InvalidStateError(f"第 {next_number} 章已有正文，不能重复自动生成")
+
+    session = getattr(engine.uow, "session", None)
+    automation_task = None
+    if isinstance(session, AsyncSession):
+        automation_task = AutomationTask(
+            project_id=project_id,
+            task_type="generate_next_chapter",
+            status="running",
+            chapter_number=next_number,
+            max_attempts=body.max_attempts,
+            payload={"human_notes": body.human_notes or ""},
+            started_at=datetime.now(timezone.utc),
+        )
+        session.add(automation_task)
+        await session.flush()
+
+    suggestion = await suggest_chapter_plan(
+        project_id,
+        ChapterPlanSuggest(chapter_number=next_number),
+        engine,
+        workflow,
+    )
+    plan_body = ChapterPlanCreate.model_validate(suggestion.model_dump(mode="json"))
+    created = await create_chapter_plan(project_id, plan_body, engine)
+    plan = created["plan"]
+    await engine.chapter_plans.submit_for_review(plan.id)
+    plan = await engine.chapter_plans.approve(plan.id, confirmed_by=actor.id or "system-auto")
+
+    attempts: list[dict] = []
+    result: dict | None = None
+    for attempt in range(1, body.max_attempts + 1):
+        result = await generate_chapter(
+            project_id,
+            next_number,
+            GenerateBody(
+                human_notes=body.human_notes or "自动生成下一章，并按审核结果自动重试。",
+                persist=True,
+                overwrite_human=attempt > 1,
+            ),
+            engine,
+            workflow,
+            actor,
+            review_workflow,
+        )
+        attempts.append({
+            "attempt": attempt,
+            "review_status": result["review_status"],
+            "auto_approved": result["auto_approved"],
+            "length_ok": result["length_ok"],
+        })
+        if result["review_status"] == "passed":
+            break
+
+    assert result is not None
+    chapter = await engine.chapters.get_by_number(project_id, next_number)
+    if automation_task is not None and isinstance(session, AsyncSession):
+        automation_task.status = "completed" if result["review_status"] == "passed" else "needs_human_review"
+        automation_task.attempt_count = len(attempts)
+        automation_task.result = {"review_status": result["review_status"], "attempts": attempts}
+        automation_task.completed_at = datetime.now(timezone.utc)
+        await session.commit()
+    draft_upload = None
+    if result["review_status"] == "passed":
+        try:
+            draft_upload = await queue_chapter_draft_upload(project_id, next_number, {}, engine)
+        except Exception as exc:
+            draft_upload = {"status": "blocked", "error": str(exc)[:1000]}
+    return {
+        "chapter": chapter,
+        "chapter_number": next_number,
+        "plan": plan,
+        "attempts": attempts,
+        "completed": result["review_status"] == "passed",
+        "requires_human_approval": result["requires_human_approval"],
+        "review_status": result["review_status"],
+        "next_action": "open_chapter" if result["review_status"] == "passed" else "human_review",
+        "draft_upload": draft_upload,
+    }
+
+
+@router.post("/projects/{project_id}/chapters/{number}/publish/draft")
+async def queue_chapter_draft_upload(
+    project_id: UUID,
+    number: int,
+    body: dict,
+    engine: Annotated[NovelEngine, Depends(get_engine)],
+) -> dict:
+    """Create per-platform upload records without pretending an upload happened.
+
+    Platform credentials and official upload APIs are intentionally external to
+    the writing pipeline.  Until an adapter is configured, rows remain
+    ``not_configured`` and can be retried independently.
+    """
+    project = await engine.get_project(project_id)
+    platform = (project.target_platform or "").strip().lower()
+    if platform not in {"fanqie", "qidian", "qimao"}:
+        raise InvalidStateError("当前作品的平台标记不支持自动上传")
+    requested_platforms = list(dict.fromkeys(body.get("platforms") or [platform]))
+    if requested_platforms != [platform]:
+        raise InvalidStateError(
+            f"作品平台标记为 {platform}，不能跨平台上传；本次只能上传到 {platform}"
+        )
+    chapter = await engine.chapters.get_by_number(project_id, number)
+    if not chapter.content.strip():
+        raise InvalidStateError("不能上传空章节")
+    session = getattr(engine.uow, "session", None)
+    if not isinstance(session, AsyncSession):
+        raise InvalidStateError("发布队列需要数据库会话")
+    rows = []
+    settings = get_settings()
+    platforms = [platform]
+    for platform in platforms:
+        row = await session.scalar(
+            select(PublishTask).where(PublishTask.chapter_id == chapter.id, PublishTask.platform == platform)
+        )
+        if row is None:
+            row = PublishTask(
+                project_id=project_id,
+                chapter_id=chapter.id,
+                platform=platform,
+                local_chapter_number=number,
+                platform_book_id=project.platform_book_id,
+                platform_chapter_number=number,
+                platform_chapter_title=chapter.title,
+                content_fingerprint=_content_fingerprint(chapter.content),
+                status="pending",
+                payload={"title": chapter.title, "content": chapter.content},
+                error_message=None,
+            )
+            session.add(row)
+            await session.flush()
+        if row.local_chapter_number != number:
+            row.status = "failed"
+            row.error_message = "本地章节映射不一致，已阻止重复或错章上传"
+        elif row.platform_book_id and project.platform_book_id and row.platform_book_id != project.platform_book_id:
+            row.status = "failed"
+            row.error_message = "平台书籍 ID 已变化，需重新确认绑定后再上传"
+        elif not project.platform_book_id:
+            row.status = "needs_book_binding"
+            row.error_message = "请先绑定该作品在目标平台的书籍 ID"
+        else:
+            publisher = get_platform_publisher(platform, settings)
+            if publisher is None:
+                row.status = "not_configured"
+                row.error_message = "尚未配置该平台的上传适配器或授权凭据"
+            elif row.status not in {"awaiting_confirmation", "confirmed", "published"}:
+                row.status = "uploading"
+                row.attempts += 1
+                try:
+                    uploaded = await publisher.upload_draft({
+                        **row.payload,
+                        "platform_book_id": project.platform_book_id,
+                        "chapter_number": number,
+                    })
+                    response_chapter_number = uploaded.response.get("chapter_number")
+                    if response_chapter_number is not None and int(response_chapter_number) != number:
+                        raise RuntimeError(
+                            f"平台返回章节号 {response_chapter_number}，预期为 {number}，已阻止错章确认"
+                        )
+                    row.status = "awaiting_confirmation"
+                    row.external_chapter_id = uploaded.external_id
+                    row.platform_book_id = project.platform_book_id
+                    row.platform_chapter_number = int(response_chapter_number or number)
+                    row.platform_chapter_title = chapter.title
+                    row.response = uploaded.response
+                    row.error_message = None
+                except Exception as exc:
+                    row.status = "failed"
+                    row.error_message = str(exc)[:1000]
+        rows.append(row)
+    await session.commit()
+    statuses = {row.status for row in rows}
+    if statuses and statuses.issubset({"awaiting_confirmation", "draft_uploaded", "confirmed", "published"}):
+        next_action = "human_confirm_publish"
+    elif "failed" in statuses:
+        next_action = "retry_failed_platforms"
+    else:
+        next_action = "configure_platform_adapter"
+    return {"chapter_number": number, "tasks": rows, "next_action": next_action}
 
 
 @router.post("/projects/{project_id}/chapters/{number}/propose-edit")
