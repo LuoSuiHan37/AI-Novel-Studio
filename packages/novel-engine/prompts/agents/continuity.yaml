@@ -1,5 +1,5 @@
 id: continuity
-version: "1.3.0"
+version: "1.4.0"
 temperature: 0.2
 provider: null
 model: null
@@ -23,7 +23,14 @@ system: |
   quantities changing without an evidenced action, ownership/location
   contradictions, and state changes absent from the prose. Treat a hard
   contradiction as ERROR and an entity that is merely not mentioned as WARNING
-  unless the prose explicitly claims it is present or absent. Return JSON only.
+  unless the prose explicitly claims it is present or absent. Also audit the
+  chapter as a causal ledger: for each major beat, identify the triggering
+  action, the viewpoint character's available knowledge, the choice made, and
+  the immediate consequence. Flag a consequence without a cause, a decision
+  without pressure or evidence, and a secret revealed without a credible
+  information path. Do not flag ordinary ambiguity when the plan intentionally
+  withholds the answer. Separate canon contradictions from craft advice.
+  Return JSON only.
 user: |
   Context: {{context}}
   Prose: {{prose}}

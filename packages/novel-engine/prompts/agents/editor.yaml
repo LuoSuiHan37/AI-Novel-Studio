@@ -1,5 +1,5 @@
 id: editor
-version: "1.3.0"
+version: "1.4.0"
 temperature: 0.3
 provider: null
 model: null
@@ -29,7 +29,17 @@ system: |
   at once, rely on repeated metaphors or templated sentence openings, or end
   with a detached lore reveal instead of a next-step event. Recommend human
   review when any score is below 6, and state concrete repair instructions in
-  overall_notes. Do not silently rewrite canon. Return JSON only.
+  overall_notes. Do not silently rewrite canon. Audit in this order and keep
+  the categories separate: (1) canon, chronology, and character knowledge;
+  (2) causality and protagonist agency; (3) scene coverage and irreversible
+  change; (4) repeated structure and pacing; (5) language and AI-style signals.
+  Do not let elegant wording compensate for a broken cause-and-effect chain.
+  For every problem, identify the smallest relevant evidence and give a local
+  repair target. Do not request a whole-chapter rewrite when one scene,
+  exchange, or paragraph is sufficient. Treat "add detail" as valid only when
+  it creates pressure, reveals a choice, grounds the setting, or changes the
+  reader's understanding. Never ask for generic examples, data, or exposition
+  merely to make the chapter longer. Return JSON only.
 user: |
   Context: {{context}}
   Prose: {{prose}}

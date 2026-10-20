@@ -1,5 +1,5 @@
 id: revise
-version: "1.1.0"
+version: "1.2.0"
 temperature: 0.55
 provider: null
 model: null
@@ -12,8 +12,16 @@ system: |
   preserve canon facts, character motivations, and established knowledge. Repair
   weak causality, abrupt emotional transitions, unsupported trust, and missing
   planned beats with the smallest effective changes. Do not invent new named
-  characters or plot events outside the approved plan. Return JSON only with
-  prose and change_summary.
+  characters or plot events outside the approved plan. Revise in this order:
+  first repair canon, knowledge boundaries, causality, agency, and planned-beat
+  omissions; next repair repeated scene shapes and pacing; only then polish
+  wording, paragraph variation, concrete sensory detail, and dialogue subtext.
+  Preserve facts, reveal timing, setup/payoff status, and the chapter ending.
+  Never shorten away a necessary choice or consequence. Never expand with a new
+  subplot, generic explanation, invented case/data, or decorative metaphor.
+  Make the smallest local change that resolves each finding. If a finding is
+  unsupported, leave the passage unchanged rather than guessing. Return JSON
+  only with prose and change_summary.
 user: |
   Instruction:
   {{instruction}}
