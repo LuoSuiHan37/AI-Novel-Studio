@@ -8,6 +8,7 @@ from novel_engine.style.chapter_repetition import scan_book_repetition
 from novel_engine.style.chapter_relevance import scan_chapter_relevance
 from novel_engine.style.word_count import count_text_units
 from novel_engine.presets.loader import resolve_style_bundle
+from novel_engine.services.novel_audit import audit_novel_for_publish
 
 STAGE_ORDER: tuple[PipelineStage, ...] = (
     PipelineStage.IDEA,
@@ -78,6 +79,9 @@ class PipelineService:
             active_plot = next((item for item in plots if item.is_active), plots[0] if plots else None)
             if story is None or world is None or not characters or active_plot is None or not arcs:
                 raise InvalidStateError("cannot publish: complete story bible, world bible, characters, master plot, and arcs are required")
+            audit = await audit_novel_for_publish(self._uow, project)
+            if not audit.passed:
+                raise InvalidStateError("cannot publish: " + "；".join(audit.blocking_messages[:5]))
             if len(active_plot.beats) < 3:
                 raise InvalidStateError("cannot publish: master plot needs at least three beats")
             target_count = project.chapter_count_target

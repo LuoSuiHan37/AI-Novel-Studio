@@ -16,6 +16,7 @@ from novel_engine.models.entities import (
     StoryBible,
     WorldBible,
 )
+from novel_engine.domain.errors import DuplicateError
 from novel_engine.ports.repositories import NovelUnitOfWork
 
 
@@ -169,6 +170,19 @@ class _ChapterRepo:
         )
 
     async def save(self, chapter: Chapter) -> Chapter:
+        duplicate = next(
+            (
+                item for item in self._items.values()
+                if item.id != chapter.id
+                and item.project_id == chapter.project_id
+                and item.chapter_number == chapter.chapter_number
+            ),
+            None,
+        )
+        if duplicate is not None:
+            raise DuplicateError(
+                f"chapter number already exists for project: {chapter.chapter_number}"
+            )
         self._items[chapter.id] = chapter.model_copy(deep=True)
         return chapter
 
