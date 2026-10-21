@@ -209,6 +209,8 @@ async def create_project(
                     "status": "draft",
                 },
                 "project_review_required": True,
+                "story_focus_required": True,
+                **({"story_focus": body.story_focus.model_dump()} if body.story_focus else {}),
             },
         )
     )
@@ -431,6 +433,13 @@ async def patch_project(
             updates.get("target_platform", current.target_platform),
         )
     creative_profile = updates.pop("creative_profile", None)
+    story_focus = updates.pop("story_focus", None)
+    if story_focus is not None:
+        updates["extra_metadata"] = {
+            **(updates.get("extra_metadata") or current.extra_metadata or {}),
+            "story_focus": story_focus,
+            "story_focus_required": True,
+        }
     if creative_profile is not None:
         updates["extra_metadata"] = {
             **(current.extra_metadata or {}),

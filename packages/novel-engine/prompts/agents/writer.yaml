@@ -1,5 +1,5 @@
 id: writer
-version: "1.9.0"
+version: "2.0.0"
 temperature: 0.75
 provider: null
 model: null
@@ -22,6 +22,12 @@ system: |
   prose. A local event may be an office scene, but it must serve the book's
   primary genre; do not let a billionaire-romance chapter read like ordinary
   workplace suspense. If the contract forbids a drift, do not write that drift.
+  Treat context.story_focus as the frozen positioning contract. The
+  core_promise, reader_question, protagonist_goal, central_opposition, and
+  primary_thread must remain visible through this chapter's actions. Secondary
+  threads are support only; do not let them become a new story. If the chapter
+  plan conflicts with story_focus, preserve canon but do not silently invent a
+  new premise or promote a secondary thread to the main plot.
   The work_tags field inside context.creative_contract is a soft hint for
   commercial positioning, tone, and optional flavor only. It is never a
   mandatory event list. Do not insert, repeat, or prioritize a tag when it
@@ -58,6 +64,10 @@ system: |
   chapter title, goal, conflict, emotional arc, reveal, setup, payoff, and
   cliffhanger. Write the listed scenes in order and include each scene's goal,
   conflict, turning point, dialogue goal, information revealed, and ending.
+  If structure_beat_type is a reversal or shock stage is present, deliver that
+  planned turn on the page with a concrete action, evidence, and consequence.
+  Do not reveal a later reversal early or replace a planned shock with vague
+  narration.
   Treat context.current_phase and context.phase_rules as active constraints for
   reveal size, consequences, and pacing. Do not expose phase labels in prose.
   When present, every scene must respect protagonist_want, active_pressure,

@@ -131,7 +131,17 @@ def plot_to_outline(plot: MasterPlot, arcs: list[StoryArc]) -> OutlineOutput:
         structure=plot.structure,
         summary=plot.summary,
         beats=[
-            OutlineBeat(name=item.name, description=item.description, chapter_hint=item.chapter_hint)
+            OutlineBeat(
+                name=item.name,
+                description=item.description,
+                chapter_hint=item.chapter_hint,
+                beat_type=item.beat_type,
+                reader_belief=item.reader_belief,
+                truth=item.truth,
+                emotional_shock=item.emotional_shock,
+                setup=item.setup,
+                payoff=item.payoff,
+            )
             for item in plot.beats
         ],
         arcs=[
@@ -220,6 +230,7 @@ def build_writer_context(
     chapter_word_max: int = 2500,
     story_state_ledger: str = "",
     creative_contract: dict | None = None,
+    story_focus: dict | None = None,
     current_phase: str = "",
     phase_rules: list[str] | None = None,
 ) -> WriterContext:
@@ -293,6 +304,7 @@ def build_writer_context(
         relationship_ledger=writer_profile.get("relationship_ledger", []),
         story_state_ledger=story_state_ledger,
         creative_contract=creative_contract or {},
+        story_focus=story_focus or {},
         current_phase=current_phase,
         phase_rules=tuple(phase_rules or []),
     )

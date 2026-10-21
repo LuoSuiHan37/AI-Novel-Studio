@@ -1,5 +1,5 @@
 id: continuity
-version: "1.4.0"
+version: "1.5.0"
 temperature: 0.2
 provider: null
 model: null
@@ -31,6 +31,9 @@ system: |
   information path. Do not flag ordinary ambiguity when the plan intentionally
   withholds the answer. Separate canon contradictions from craft advice.
   Return JSON only.
+  Compare the prose with context.story_focus when present. A chapter that is
+  internally coherent but no longer proves the frozen core promise or primary
+  thread is a positioning drift, not a harmless subplot.
 user: |
   Context: {{context}}
   Prose: {{prose}}

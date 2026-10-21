@@ -8,6 +8,12 @@ from typing import Any
 from novel_engine.models.enums import ApprovalStatus, ChapterStatus
 from novel_engine.ports.repositories import NovelUnitOfWork
 from novel_engine.style.chapter_repetition import scan_book_repetition
+from novel_engine.services.story_positioning import (
+    ChapterFocus,
+    StoryFocus,
+    validate_chapter_focus,
+    validate_story_focus,
+)
 
 
 @dataclass(frozen=True)
@@ -42,6 +48,18 @@ async def audit_novel_for_publish(
     """
 
     findings: list[AuditFinding] = []
+    metadata = project.extra_metadata or {}
+    raw_focus = metadata.get("story_focus")
+    focus_required = bool(metadata.get("story_focus_required") or raw_focus)
+    story_focus = None
+    if focus_required and not isinstance(raw_focus, dict):
+        findings.append(AuditFinding("story_focus_missing", "没有冻结全书核心卖点和主线"))
+    elif isinstance(raw_focus, dict):
+        try:
+            story_focus = StoryFocus.model_validate(raw_focus)
+            findings.extend(AuditFinding("story_focus_invalid", item) for item in validate_story_focus(story_focus))
+        except Exception as exc:
+            findings.append(AuditFinding("story_focus_invalid", f"故事定位格式无效：{exc}"))
     chapters = await uow.chapters.list_by_project(project.id)
     numbers = [int(item.chapter_number) for item in chapters]
     duplicates = sorted(number for number, count in Counter(numbers).items() if count > 1)
@@ -100,6 +118,19 @@ async def audit_novel_for_publish(
                         f"第 {number} 章场景 {scene.scene_number} 缺少主动性约束：{', '.join(missing_scene_fields)}",
                     )
                 )
+        if story_focus is not None:
+            raw_chapter_focus = (chapter.extra_metadata or {}).get("story_focus")
+            if not isinstance(raw_chapter_focus, dict):
+                findings.append(AuditFinding("chapter_focus_missing", f"第 {number} 章没有主线推进记录"))
+            else:
+                try:
+                    chapter_focus = ChapterFocus.model_validate(raw_chapter_focus)
+                    findings.extend(
+                        AuditFinding("chapter_focus_invalid", f"第 {number} 章：{item}")
+                        for item in validate_chapter_focus(chapter_focus, story_focus=story_focus)
+                    )
+                except Exception as exc:
+                    findings.append(AuditFinding("chapter_focus_invalid", f"第 {number} 章主线记录格式无效：{exc}"))
 
     findings.extend(
         AuditFinding(

@@ -114,7 +114,6 @@ def create_app() -> FastAPI:
 
     application.add_exception_handler(DomainError, domain_error_handler)
     application.add_exception_handler(TimeoutError, database_error_handler)
-    application.add_exception_handler(OSError, database_error_handler)
     application.add_exception_handler(SQLAlchemyError, database_error_handler)
     application.add_exception_handler(ProviderError, provider_error_handler)
     application.add_exception_handler(StarletteHTTPException, http_exception_handler)

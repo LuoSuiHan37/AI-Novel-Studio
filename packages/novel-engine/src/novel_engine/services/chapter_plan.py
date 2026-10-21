@@ -24,7 +24,14 @@ class ChapterPlanService:
         await require_project(self._uow, project_id)
         return await self._uow.chapter_plans.list_by_project(project_id)
 
-    async def create(self, plan: ChapterPlan, *, auto_approve: bool = True, commit: bool = True) -> ChapterPlan:
+    async def create(
+        self,
+        plan: ChapterPlan,
+        *,
+        auto_approve: bool = True,
+        commit: bool = True,
+        focus_metadata: dict | None = None,
+    ) -> ChapterPlan:
         project = await require_project(self._uow, plan.project_id)
         _validate_plan(plan)
         target = project.chapter_count_target
@@ -62,6 +69,8 @@ class ChapterPlanService:
                 "cliffhanger": plan.cliffhanger,
                 "status": "planned",
             }
+            if focus_metadata is not None:
+                metadata["story_focus"] = dict(focus_metadata)
             await self._uow.chapters.save(chapter.model_copy(update={"extra_metadata": metadata}))
         if commit:
             await self._uow.commit()

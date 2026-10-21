@@ -732,6 +732,8 @@ async def finalize_creation(
                     "research_binding": binding_metadata,
                     "creative_contract": creative_contract,
                     "work_tags": body.pitch.work_tags,
+                    "story_focus_required": True,
+                    **({"story_focus": body.story_focus.model_dump()} if body.story_focus else {}),
                 },
             }),
             commit=False,

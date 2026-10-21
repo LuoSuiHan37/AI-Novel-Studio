@@ -326,6 +326,8 @@ def plan_to_domain(row: ChapterPlanRow) -> ChapterPlan:
         target_word_count=int((row.extra_metadata or {}).get("target_word_count", 0) or 0),
         target_word_min=int((row.extra_metadata or {}).get("target_word_min", 0) or 0),
         target_word_max=int((row.extra_metadata or {}).get("target_word_max", 0) or 0),
+        structure_beat_type=str((row.extra_metadata or {}).get("structure_beat_type") or "plot"),
+        shock_stage=_text((row.extra_metadata or {}).get("shock_stage")),
         status=_enum(row.status, ApprovalStatus, ApprovalStatus.DRAFT),
         updated_at=row.updated_at,
     )
@@ -356,6 +358,8 @@ def apply_plan(row: ChapterPlanRow, plan: ChapterPlan) -> None:
         "target_word_count": plan.target_word_count,
         "target_word_min": plan.target_word_min,
         "target_word_max": plan.target_word_max,
+        "structure_beat_type": plan.structure_beat_type,
+        "shock_stage": plan.shock_stage,
     }
     row.status = plan.status.value
 

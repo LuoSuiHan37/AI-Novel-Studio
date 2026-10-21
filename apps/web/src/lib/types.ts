@@ -137,7 +137,17 @@ export type WorldBible = {
   status: string;
 };
 
-export type PlotBeat = { name: string; description: string; chapter_hint: number | null };
+export type PlotBeat = {
+  name: string;
+  description: string;
+  chapter_hint: number | null;
+  beat_type?: string;
+  reader_belief?: string;
+  truth?: string;
+  emotional_shock?: string;
+  setup?: string;
+  payoff?: string;
+};
 export type MasterPlot = {
   id: string;
   title: string;

@@ -460,6 +460,7 @@ class ChapterGenerationPipeline:
             phase_rules=phase_rules,
             story_state_ledger=self.memory.store.story_state_ledger(project_id),
             creative_contract=creative_contract,
+            story_focus=(project.extra_metadata or {}).get("story_focus", {}),
             chapter_word_min=style.platform.chapter_word_min,
             chapter_word_max=style.platform.chapter_word_max,
         )

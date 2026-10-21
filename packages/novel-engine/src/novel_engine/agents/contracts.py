@@ -124,6 +124,12 @@ class OutlineBeat(AgentModel):
     name: str
     description: str
     chapter_hint: int | None = None
+    beat_type: str = "plot"
+    reader_belief: str = ""
+    truth: str = ""
+    emotional_shock: str = ""
+    setup: str = ""
+    payoff: str = ""
 
 
 class OutlineArc(AgentModel):
@@ -202,6 +208,8 @@ class ChapterPlannerOutput(AgentModel):
     setup: str
     payoff: str
     cliffhanger: str
+    structure_beat_type: str = "plot"
+    shock_stage: str = ""
     scenes: list[SceneDraft]
     target_word_count: int = 0
     target_word_min: int = 0
@@ -241,6 +249,7 @@ class WriterContext(AgentModel):
     relationship_ledger: list[dict] = Field(default_factory=list)
     story_state_ledger: str = ""
     creative_contract: dict = Field(default_factory=dict)
+    story_focus: dict = Field(default_factory=dict)
     current_phase: str = ""
     phase_rules: tuple[str, ...] = ()
 

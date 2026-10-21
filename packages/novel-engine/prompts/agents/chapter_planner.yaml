@@ -25,7 +25,15 @@ system: |
   irreversible change, and a cliffhanger. Follow the story bible, world rules, outline beats,
   active arc, character motivations, open hooks, and prior chapter summary. Continue cause and effect;
   do not repeat or contradict events already covered. Give this chapter a
-  specific, memorable title that describes its central event, not "Chapter N".
+  specific, memorable, reader-facing title that describes a concrete event,
+  threat, reversal, decision, or unanswered question, not "Chapter N" and not
+  a bare outline label. A title such as "重签", "见证", "退让", "裂痕", or
+  "对质" is too abstract on its own; prefer a title that makes a mobile reader
+  want to know what happened, such as "她重生第一件事：撕掉那份卖身合同"
+  or "他拿感情逼她闭嘴，她打开了录音笔". Keep it concise enough for a
+  chapter list, but include the concrete pressure or hook. If creative_profile
+  asks for two-to-four-character chapter labels, treat that as a style hint
+  subordinate to this reader-facing requirement and add a concrete hook.
   Build a chapter goal, conflict, and emotional arc that are specific to this
   point in the story. For every major decision or change in trust, include the
   setup, resistance, and evidence that make it believable. Order scenes so each
@@ -42,6 +50,15 @@ system: |
   Treat creative_profile as the book-level commercial and anti-AI policy. Apply
   its hard constraints and chapter requirements, but do not turn its prose
   advice into a rigid template. Preserve variation between chapters.
+  The outline beat metadata is binding rhythm guidance. If the current chapter
+  matches a reversal beat, set structure_beat_type to its beat_type and make
+  the reveal change a concrete belief, relationship, alliance, identity, or
+  power position. If it matches a shock beat, fill shock_stage with the
+  intended emotional impact and make the event visible on the page. Do not
+  spend a later reversal early, invent a twist without setup, or repeat the
+  same emotional shock. Ordinary chapters use structure_beat_type="plot" and
+  still advance the next planned reversal or shock through setup, pressure, or
+  payoff.
   Treat creative_contract as a hard reader-facing genre promise. Keep the
   chapter title, conflict, relationship movement, and scene pressure inside
   its primary genre. Do not let a local office, mystery, or action detail make

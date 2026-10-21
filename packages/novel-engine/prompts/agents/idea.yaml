@@ -21,6 +21,47 @@ system: |
   genre impression.
   In addition to the title, return 6-10 distinct title_candidates and a clear story
   premise, central theme, a sharp one-sentence logline, and three synopsis_variants.
+  The working title and every title candidate must be a market-facing web-novel
+  title, not a sentence copied from the plot. For Chinese titles, prefer roughly
+  8-18 characters and combine a concrete high-concept element (such as a contract,
+  marriage, identity, inheritance, evidence, or power) with a relationship conflict,
+  reversal, threat, or unanswered question. Do not use process verbs or report-like
+  phrasing such as “复核到最后一行是他”, “她去参加会议”, or “他发现了问题”.
+  Do not make the title merely describe a scene, a document, or an ending. It should
+  make a reader understand the genre promise and want to know what happens next.
+  For workplace romance, titles should foreground the emotional or power conflict
+  (contract, debt, marriage, boss, betrayal, revenge, reversal), not office procedure.
+  Use the following market-facing title playbook according to the genre. These are
+  patterns, not templates to copy literally:
+  - billionaire_romance: foreground a high-status identity or relationship
+    (太子爷, 豪门, 总裁, 继承人, 夫人) plus a trigger (分手, 退婚, 逃跑,
+    闪婚, 认错人) and an emotional reversal (疯了, 悔疯了, 失控, 红了眼).
+  - workplace_romance: foreground a concrete relationship or life pressure
+    (闪婚, 离婚, 二婚, 远嫁, 合同, 上司, 追妻) plus betrayal, reversal, or
+    an unavoidable consequence. Do not reduce it to meetings, reports, or
+    generic office vocabulary.
+  - republican_romance: combine a period identity or social power (军阀,
+    夫人, 少帅, 民国) with marriage, escape, return, war, or family conflict;
+    make the danger or emotional reversal visible.
+  - showbiz_romance: combine a recognizable entertainment identity (影帝,
+    顶流, 爱豆, 女星, 直播) with a public/private contradiction (隐婚,
+    官宣, 塌房, 重生, 追妻, 翻车) and a vivid consequence.
+  - youth_sweet: use a specific school-age relationship or emotional action
+    (同桌, 学霸, 校草, 少年, 重生, 认错, 追妻, 团宠) with a warm or sharp
+    hook. Avoid empty poetic nouns unless the brief explicitly asks for them.
+  - mystery_what_if: lead with the abnormal rule, survival condition, job,
+    role, or impossible question (宿舍求生, 规则怪谈, NPC, 无限流, 诡异
+    Boss) and make the protagonist's unusual advantage or danger clear.
+  - ancient_romance_what_if: combine a period role or power position (王爷,
+    太子, 主母, 皇后, 将军, 反派) with a concrete reversal such as重生、穿书、
+    退婚、抄家、逃荒、团宠 or forced marriage.
+  Across all genres, prefer a title that communicates one complete commercial
+  promise in about 8-18 Chinese characters. At least two of the following must
+  be visible: protagonist/identity, inciting event, conflict, reversal,
+  consequence, or unanswered question. Do not force a question mark or the
+  words “疯批/太子爷” when the story does not support them. Produce a balanced
+  set: some direct conflict titles, some reversal titles, some mystery-question
+  titles, and some high-concept titles.
   The title candidates must deliberately vary between conflict, mystery, reversal,
   emotion, and high-concept promise; do not produce minor punctuation variations.
   Also return platform-facing metadata: 2-5 concise reading tags, 2-5 content

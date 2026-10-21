@@ -52,6 +52,26 @@ class ProjectCreate(ApiModel):
     tone: str | None = None
     logline: str | None = None
     synopsis: str | None = None
+    story_focus: "StoryFocusInput | None" = None
+
+
+class StoryFocusInput(ApiModel):
+    title_promise: str = ""
+    core_promise: str
+    reader_question: str
+    protagonist_goal: str
+    central_opposition: str
+    primary_thread: str
+    secondary_threads: list[str] = Field(default_factory=list, max_length=2)
+    forbidden_drifts: list[str] = Field(default_factory=list)
+
+
+class ChapterFocusInput(ApiModel):
+    primary_thread: str
+    question_progress: str
+    answered_or_advanced_question: str
+    new_major_mysteries: list[str] = Field(default_factory=list, max_length=1)
+    resolved_or_narrowed_mysteries: list[str] = Field(default_factory=list)
 
 
 class CreationDraftSave(ApiModel):
@@ -100,6 +120,7 @@ class ProjectUpdate(BaseModel):
     logline: str | None = None
     synopsis: str | None = None
     creative_profile: dict | None = None
+    story_focus: StoryFocusInput | None = None
 
 
 class PlatformBindingBody(ApiModel):
@@ -139,6 +160,7 @@ class ProjectFinalizeCreation(ApiModel):
     framework_proposal: dict
     framework_confirmed: bool = False
     confirmed_by: str
+    story_focus: StoryFocusInput | None = None
 
 
 class StoryPatch(BaseModel):
@@ -230,6 +252,12 @@ class BeatIn(ApiModel):
     name: str
     description: str
     chapter_hint: int | None = None
+    beat_type: str = "plot"
+    reader_belief: str = ""
+    truth: str = ""
+    emotional_shock: str = ""
+    setup: str = ""
+    payoff: str = ""
 
 
 class PlotPatch(BaseModel):
@@ -313,10 +341,13 @@ class ChapterPlanCreate(ApiModel):
     setup: str
     payoff: str
     cliffhanger: str
+    structure_beat_type: str = "plot"
+    shock_stage: str = ""
     scenes: list[SceneIn] = Field(default_factory=list)
     target_word_count: int | None = None
     target_word_min: int | None = None
     target_word_max: int | None = None
+    focus: ChapterFocusInput | None = None
 
 
 class ChapterPlanSuggest(ApiModel):

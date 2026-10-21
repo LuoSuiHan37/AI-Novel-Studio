@@ -124,6 +124,12 @@ class PlotBeat(DomainModel):
     name: str
     description: str
     chapter_hint: int | None = None
+    beat_type: str = "plot"
+    reader_belief: str = ""
+    truth: str = ""
+    emotional_shock: str = ""
+    setup: str = ""
+    payoff: str = ""
 
 
 class MasterPlot(DomainModel):
@@ -186,6 +192,8 @@ class ChapterPlan(DomainModel):
     setup: str
     payoff: str
     cliffhanger: str
+    structure_beat_type: str = "plot"
+    shock_stage: str = ""
     target_word_count: int = 0
     target_word_min: int = 0
     target_word_max: int = 0

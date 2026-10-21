@@ -181,7 +181,7 @@ def test_prompt_spec_metadata() -> None:
 
 def test_writer_prompt_version_and_alias_guidance() -> None:
     spec = load_prompt_spec("agents/writer.yaml")
-    assert spec.version == "1.9.0"
+    assert spec.version == "2.0.0"
     assert "formal names or aliases" in spec.system
     assert "soft hint" in spec.system
 
@@ -195,7 +195,7 @@ def test_chapter_planner_prioritizes_story_over_work_tags() -> None:
 
 def test_all_agents_inherit_fanqie_content_safety_policy() -> None:
     spec = load_prompt_spec("agents/writer.yaml")
-    assert spec.version == "1.9.0"
+    assert spec.version == "2.0.0"
     assert "\u756a\u8304\u5c0f\u8bf4\u5185\u5bb9\u5b89\u5168\u987b\u77e5" in spec.system
     assert "\u672a\u6210\u5e74\u4eba\u8d1f\u9762\u5bfc\u5411" in spec.system
     assert "\u53d1\u73b0\u98ce\u9669\u65f6\u505c\u6b62\u6269\u5199" in spec.system

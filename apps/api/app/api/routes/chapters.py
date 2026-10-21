@@ -32,7 +32,7 @@ from app.api.deps import (
 )
 from app.api.schemas import AutoNextChapterBody, ChapterPatch, ChapterPlanCreate, ChapterPlanSuggest, ConfirmBody, GenerateBody, ProposeEditBody
 from app.services.book_snapshot import save_project_snapshot
-from app.services.creative_quality import rank_creative_candidates
+from app.services.creative_quality import make_reader_facing_chapter_title, rank_creative_candidates
 from app.services.prompt_optimization import chapter_optimization_signals
 from app.services.platform_publishers import get_platform_publisher
 from app.core.config import get_settings
@@ -716,11 +716,14 @@ async def create_chapter_plan(
             setup=body.setup,
             payoff=body.payoff,
             cliffhanger=body.cliffhanger,
+            structure_beat_type=body.structure_beat_type,
+            shock_stage=body.shock_stage,
             target_word_count=body.target_word_count or 0,
             target_word_min=body.target_word_min or 0,
             target_word_max=body.target_word_max or 0,
         ),
         auto_approve=False,
+        focus_metadata=body.focus.model_dump() if body.focus else None,
     )
     scenes = []
     for item in body.scenes:
@@ -829,10 +832,16 @@ async def suggest_chapter_plan(
     )
     if not proposal.output.scenes or not proposal.output.characters:
         raise InvalidStateError("AI 章节计划必须包含角色和至少一个场景，请重试或完善角色设定")
+    reader_facing_title = make_reader_facing_chapter_title(
+        proposal.output.chapter_title,
+        conflict=proposal.output.conflict,
+        cliffhanger=proposal.output.cliffhanger,
+        chapter_goal=proposal.output.chapter_goal,
+    )
     unique_title = await _ensure_unique_chapter_title(
         project_id,
         body.chapter_number,
-        proposal.output.chapter_title,
+        reader_facing_title,
         engine,
     )
     proposal_output = proposal.output.model_copy(update={"chapter_title": unique_title})

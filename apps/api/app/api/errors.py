@@ -107,7 +107,7 @@ async def provider_error_handler(request: Request, exc: ProviderError) -> JSONRe
 
 async def database_error_handler(request: Request, exc: Exception) -> JSONResponse:
     """Keep an unavailable database from turning into an opaque 500 traceback."""
-    if not isinstance(exc, (SQLAlchemyError, TimeoutError, OSError)):
+    if not isinstance(exc, (SQLAlchemyError, TimeoutError)):
         raise exc
     return error_payload(
         "database_unavailable",
