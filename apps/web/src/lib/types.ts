@@ -332,7 +332,7 @@ export type ResearchStage = {
   id: string;
   title: string;
   detail: string;
-  status: "done" | "running" | "pending";
+  status: "done" | "running" | "pending" | "error";
   output: string;
   updated_at?: string;
 };

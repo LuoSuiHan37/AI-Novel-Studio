@@ -35,6 +35,45 @@ def validate_work_tags(value: Mapping[str, list[str]] | None, *, allow_empty: bo
 def default_work_tags(genre: str) -> dict[str, list[str]]:
     if genre == "billionaire_romance":
         return {"style": ["甜宠"], "role": ["豪门总裁"], "plot": ["豪门恩怨"], "background": ["都市"]}
+    if genre == "sci_fi_apocalypse":
+        return {"style": ["爽文"], "role": ["全能"], "plot": ["末世", "求生", "进化"], "background": ["科幻", "末世"]}
+    if genre == "mystery_what_if":
+        return {"style": ["悬疑", "烧脑"], "role": ["侦探"], "plot": ["规则怪谈", "求生"], "background": ["惊悚世界"]}
+    if genre == "showbiz_romance":
+        return {"style": ["甜宠", "轻松"], "role": ["明星"], "plot": ["娱乐圈", "恋爱"], "background": ["都市"]}
+    if genre == "workplace_romance":
+        return {"style": ["甜宠", "现实题材"], "role": ["女主"], "plot": ["职场", "婚恋"], "background": ["都市", "现代言情"]}
+    if genre == "republican_romance":
+        return {"style": ["正剧", "虐恋"], "role": ["将军"], "plot": ["军婚", "身份反转"], "background": ["民国"]}
+    if genre == "youth_sweet":
+        return {"style": ["青春", "甜宠"], "role": ["学生"], "plot": ["青梅竹马", "恋爱"], "background": ["校园"]}
+    if genre == "ancient_romance_what_if":
+        return {"style": ["爽文", "宅斗"], "role": ["王爷"], "plot": ["穿书", "重生"], "background": ["古代言情"]}
     if "romance" in genre:
         return {"style": ["甜宠"], "role": ["女主"], "plot": ["现代言情"], "background": ["都市"]}
     return {"style": ["爽文"], "role": ["男主"], "plot": ["身份反转"], "background": ["都市"]}
+
+
+_GENRE_TAG_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
+    "sci_fi_apocalypse": {"style": ("爽文", "烧脑", "快节奏"), "role": ("全能", "领主", "天才"), "plot": ("末世", "求生", "进化", "囤物资", "科技", "机甲"), "background": ("科幻", "末世", "未来世界", "星际")},
+    "mystery_what_if": {"style": ("悬疑", "烧脑", "恐怖"), "role": ("侦探", "法医", "全能"), "plot": ("规则怪谈", "求生", "推理", "诡异流", "无限流"), "background": ("惊悚世界", "未来世界", "科幻")},
+    "showbiz_romance": {"style": ("甜宠", "轻松", "爽文"), "role": ("明星", "顶流", "女主"), "plot": ("娱乐圈", "影视", "综艺", "恋爱"), "background": ("都市", "现代言情")},
+    "workplace_romance": {"style": ("甜宠", "现实题材", "爽文"), "role": ("女主", "豪门总裁", "女总裁"), "plot": ("职场", "婚恋", "离婚后", "追妻火葬场", "闪婚"), "background": ("都市", "现代言情")},
+    "republican_romance": {"style": ("正剧", "虐恋", "爽文"), "role": ("太子", "将军", "女主"), "plot": ("军婚", "谍战", "战争", "身份反转"), "background": ("民国", "年代")},
+    "youth_sweet": {"style": ("青春", "甜宠", "轻松"), "role": ("学生", "学霸", "校草"), "plot": ("青梅竹马", "恋爱", "暗恋", "团宠"), "background": ("校园", "现代言情")},
+    "ancient_romance_what_if": {"style": ("爽文", "甜宠", "宅斗"), "role": ("王爷", "太子", "主母", "女主"), "plot": ("穿书", "重生", "身份反转", "复仇"), "background": ("古代", "古代言情", "架空历史")},
+}
+
+
+def derive_work_tags(genre: str, text: str = "", tropes: list[str] | None = None) -> dict[str, list[str]]:
+    """Select only catalogued tags from the genre and generated creative brief."""
+    haystack = " ".join([genre, text, *(tropes or [])])
+    hints = _GENRE_TAG_HINTS.get(genre)
+    if hints is None:
+        return default_work_tags(genre)
+    defaults = default_work_tags(genre)
+    selected: dict[str, list[str]] = {}
+    for category in WORK_TAG_CATALOG:
+        matches = [tag for tag in hints.get(category, ()) if tag in haystack and tag in WORK_TAG_CATALOG[category]]
+        selected[category] = list(dict.fromkeys((matches + defaults.get(category, []))[:3]))
+    return validate_work_tags(selected, allow_empty=False)

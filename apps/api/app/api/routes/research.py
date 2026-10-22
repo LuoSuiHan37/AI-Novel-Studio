@@ -64,6 +64,15 @@ def _session(project) -> dict:
     # immutable research run.
     if not base.get("session_id"):
         base["session_id"] = str(uuid4())
+    # A completed artifact is durable proof that a stage finished. Older runs
+    # could persist the artifact while leaving the stage marker pending.
+    artifact_ids = {str(item.get("id")) for item in base.get("artifacts", []) if item.get("id")}
+    for stage in base.get("stages", []):
+        if stage.get("id") in artifact_ids and stage.get("status") != "done":
+            stage["status"] = "done"
+    base["progress"] = _progress(base)
+    if base["progress"] == 100:
+        base["status"] = "completed"
     return base
 
 
@@ -110,7 +119,8 @@ async def get_research(
 ) -> dict:
     project = await engine.get_project(project_id)
     research = _session(project)
-    if (project.extra_metadata or {}).get("research", {}).get("session_id") != research.get("session_id"):
+    stored_research = (project.extra_metadata or {}).get("research") or {}
+    if stored_research != research:
         project = await engine.update_project(_save(project, research))
     return _session(project)
 

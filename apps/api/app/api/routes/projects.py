@@ -11,6 +11,7 @@ from app.api.schemas import ActorOut, ChapterQualityFeedback, ConfirmBody, Creat
 from app.services.book_snapshot import save_project_snapshot
 from app.services.creative_quality import rank_creative_candidates
 from app.services.prompt_optimization import optimization_report
+from app.services.work_tags import derive_work_tags
 from novel_engine.agents.contracts import IdeaInput
 from novel_engine.creative.profile import compile_creative_profile
 from novel_engine.domain.errors import InvalidStateError, NotFoundError
@@ -101,6 +102,11 @@ async def suggest_project_title(
         genre=body.genre,
     )
     title = (title_options[0]["text"] if title_options else result.output.working_title.strip())
+    generated_work_tags = derive_work_tags(
+        body.genre,
+        " ".join((result.output.premise, result.output.logline, result.output.synopsis, body.brief)),
+        body.tropes,
+    )
     duplicate = any(item.casefold() == title.casefold() for item in existing_titles)
     synopsis_options = [item.strip() for item in result.output.synopsis_variants if item.strip()]
     if result.output.synopsis.strip() and result.output.synopsis.strip() not in synopsis_options:
@@ -109,6 +115,7 @@ async def suggest_project_title(
         "title": title,
         "available": not duplicate,
         "title_candidates": title_options,
+        "work_tags": generated_work_tags,
         "existing_titles": existing_titles,
         "premise": result.output.premise,
         "theme": result.output.theme or result.output.premise,

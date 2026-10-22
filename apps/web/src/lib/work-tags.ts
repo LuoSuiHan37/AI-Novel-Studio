@@ -17,6 +17,13 @@ export const WORK_TAG_CATALOG: Record<WorkTagCategory, string[]> = {
 
 export function defaultWorkTags(genre: string): WorkTags {
   if (genre === "billionaire_romance") return { style: ["甜宠"], role: ["豪门总裁"], plot: ["豪门恩怨"], background: ["都市"] };
+  if (genre === "sci_fi_apocalypse") return { style: ["爽文"], role: ["全能"], plot: ["末世", "求生", "进化"], background: ["科幻", "末世"] };
+  if (genre === "mystery_what_if") return { style: ["悬疑", "烧脑"], role: ["侦探"], plot: ["规则怪谈", "求生"], background: ["惊悚世界"] };
+  if (genre === "showbiz_romance") return { style: ["甜宠", "轻松"], role: ["明星"], plot: ["娱乐圈", "恋爱"], background: ["都市"] };
+  if (genre === "workplace_romance") return { style: ["甜宠", "现实题材"], role: ["女主"], plot: ["职场", "婚恋"], background: ["都市", "现代言情"] };
+  if (genre === "republican_romance") return { style: ["正剧", "虐恋"], role: ["将军"], plot: ["军婚", "身份反转"], background: ["民国"] };
+  if (genre === "youth_sweet") return { style: ["青春", "甜宠"], role: ["学生"], plot: ["青梅竹马", "恋爱"], background: ["校园"] };
+  if (genre === "ancient_romance_what_if") return { style: ["爽文", "宅斗"], role: ["王爷"], plot: ["穿书", "重生"], background: ["古代言情"] };
   if (genre.includes("romance")) return { style: ["甜宠"], role: ["女主"], plot: ["现代言情"], background: ["都市"] };
   return { style: ["爽文"], role: ["男主"], plot: ["身份反转"], background: ["都市"] };
 }
