@@ -15,6 +15,40 @@ def test_billionaire_contract_contains_reader_facing_signals() -> None:
     assert "普通职场日常" in contract["forbidden_drift"]
 
 
+def test_werewolf_contract_has_conflict_and_narrative_engines() -> None:
+    contract = compile_creative_contract(genre="werewolf_romance", language="zh-CN")
+    assert contract["conflict_engine"]
+    assert contract["narrative_engine"]
+    assert "月圆" in contract["title_signals"]
+    assert "契约婚姻" in contract["work_tags"]["plot"]
+
+
+def test_legacy_werewolf_contract_does_not_erase_new_defaults() -> None:
+    from types import SimpleNamespace
+    from novel_engine.creative.contract import contract_for_project
+
+    project = SimpleNamespace(
+        genre="werewolf_romance",
+        language="zh-CN",
+        extra_metadata={
+            "creative_contract": {
+                "primary_genre": "werewolf_romance",
+                "genre_label": "werewolf romance",
+                "work_tags": {
+                    "plot": ["现代言情"],
+                    "role": ["女主"],
+                    "style": ["甜宠"],
+                    "background": ["都市"],
+                },
+            }
+        },
+    )
+    contract = contract_for_project(project)
+    assert contract["genre_label"] == "狼人罗曼史"
+    assert contract["conflict_engine"]
+    assert contract["work_tags"]["plot"] == ["契约婚姻", "替嫁", "身份反转"]
+
+
 def test_billionaire_workplace_drift_is_blocked() -> None:
     contract = compile_creative_contract(genre="billionaire_romance", language="zh-CN")
     findings = _genre_alignment_findings("她加班后发现自己的工位被换到了会议室。", contract)

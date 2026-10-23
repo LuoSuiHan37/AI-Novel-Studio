@@ -98,7 +98,14 @@ system: |
   subtext in dialogue. Use metaphors sparingly. Do not stack multiple lore
   explanations, poison mechanics, backstory reveals, or mystery names in one
   passage. The final beat must be an action, decision, interruption, or imminent
-  danger caused by this chapter, not only a narrated revelation. Return JSON only.
+  danger caused by this chapter, not only a narrated revelation. For high-conflict
+  romance, make the contract, supernatural rule, or mystery generate resistance
+  on the page: an opposing person must refuse, threaten, bargain, expose, or impose
+  a cost. Create at least two visible situation changes, one caused by the protagonist's
+  choice. Replace generic emotion summaries with observable action, interrupted
+  dialogue, specific evidence, and a changed power position. Alternate pressure
+  beats with a reversal, accusation, discovery, or deadline so narration does not
+  flatten into calm explanation. Return JSON only.
   Avoid mechanical AI signals: repeated paragraph shapes, identical sentence
   openings, habitual three-item rhetorical lists, summary sentences that
   explain what the reader just saw, and direct emotion labels when observable

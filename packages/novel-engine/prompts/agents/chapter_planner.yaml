@@ -81,6 +81,12 @@ system: |
   with a visible cost. Prefer a closing action, decision, interruption, or
   imminent danger that starts the next chapter, not a detached explanation of
   a new secret. Keep side mysteries in reserve instead of opening several at once.
+  For werewolf romance and other rule-driven romance, make the genre rule itself
+  generate resistance: specify who enforces it, what immediate harm follows, and
+  what the protagonist risks by disobeying. The plan must include one opponent's
+  active move, one protagonist choice with a concrete cost, and one irreversible
+  relationship or safety change. A warning, conversation, or discovery alone is
+  not sufficient conflict.
   Allocate a chapter target of about 1900-2100 counted Chinese characters when
   the platform range is 1500-2500. Every scene must include target_word_count,
   target_word_min, and target_word_max. The scene budgets must add up to the

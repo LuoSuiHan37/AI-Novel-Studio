@@ -33,6 +33,8 @@ def validate_work_tags(value: Mapping[str, list[str]] | None, *, allow_empty: bo
 
 
 def default_work_tags(genre: str) -> dict[str, list[str]]:
+    if genre == "werewolf_romance":
+        return {"style": ["暗黑", "悬疑", "快节奏"], "role": ["男主", "女主", "强强"], "plot": ["契约婚姻", "替嫁", "身份反转"], "background": ["兽世", "幻想言情"]}
     if genre == "billionaire_romance":
         return {"style": ["甜宠"], "role": ["豪门总裁"], "plot": ["豪门恩怨"], "background": ["都市"]}
     if genre == "sci_fi_apocalypse":
@@ -55,6 +57,7 @@ def default_work_tags(genre: str) -> dict[str, list[str]]:
 
 
 _GENRE_TAG_HINTS: dict[str, dict[str, tuple[str, ...]]] = {
+    "werewolf_romance": {"style": ("暗黑", "悬疑", "快节奏", "虐恋"), "role": ("男主", "女主", "强强"), "plot": ("契约婚姻", "替嫁", "身份反转", "血脉", "带球跑", "相爱相杀", "追妻火葬场"), "background": ("兽世", "幻想言情", "精灵鬼怪")},
     "sci_fi_apocalypse": {"style": ("爽文", "烧脑", "快节奏"), "role": ("全能", "领主", "天才"), "plot": ("末世", "求生", "进化", "囤物资", "科技", "机甲"), "background": ("科幻", "末世", "未来世界", "星际")},
     "mystery_what_if": {"style": ("悬疑", "烧脑", "恐怖"), "role": ("侦探", "法医", "全能"), "plot": ("规则怪谈", "求生", "推理", "诡异流", "无限流"), "background": ("惊悚世界", "未来世界", "科幻")},
     "showbiz_romance": {"style": ("甜宠", "轻松", "爽文"), "role": ("明星", "顶流", "女主"), "plot": ("娱乐圈", "影视", "综艺", "恋爱"), "background": ("都市", "现代言情")},
